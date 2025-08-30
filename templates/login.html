@@ -1,0 +1,10 @@
+{% extends 'base.html' %}
+
+{% block title %}Login{% endblock %}
+
+{% block content %}
+    <h1>Login</h1>
+    <p>Please select your broker to login:</p>
+    <a href="/login/zerodha"><button>Login with Zerodha</button></a>
+    <a href="/login/upstox"><button>Login with Upstox</button></a>
+{% endblock %}
