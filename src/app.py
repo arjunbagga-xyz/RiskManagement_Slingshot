@@ -4,10 +4,14 @@ import upstox_client
 import os
 import time
 import threading
+import logging
 from src.db import get_db_connection, update_instrument_list
 
 app = Flask(__name__, template_folder='../templates', static_folder='../static')
 app.secret_key = os.urandom(24)
+
+# --- Logging ---
+logging.basicConfig(filename='app.log', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # --- Configuration ---
 ZERODHA_API_KEY = os.getenv("ZERODHA_API_KEY", "your_zerodha_api_key")
@@ -21,6 +25,10 @@ ACCESS_TOKENS = {
     "zerodha": None,
     "upstox": None
 }
+
+# --- Utility Functions ---
+def get_upstox_product(product_str):
+    return {"MIS": "I", "CNC": "D", "NRML": "I"}.get(product_str, "I")
 
 # --- Zerodha Login ---
 kite = KiteConnect(api_key=ZERODHA_API_KEY)
@@ -37,7 +45,7 @@ def background_price_refresher():
                 conn.close()
                 continue
 
-            broker = orders[0]['broker'] # Assuming all open orders are with the same broker
+            broker = orders[0]['broker']
             access_token = ACCESS_TOKENS.get(broker.lower())
 
             if not access_token:
@@ -95,7 +103,7 @@ def background_price_refresher():
                                     api_version="v2",
                                     body=upstox_client.PlaceOrderRequest(
                                         quantity=order['quantity'],
-                                        product={"MIS": "I", "CNC": "D"}.get(order['product'], "I"),
+                                        product=get_upstox_product(order['product']),
                                         validity="DAY",
                                         instrument_token=instrument_token,
                                         order_type='MARKET',
@@ -105,7 +113,7 @@ def background_price_refresher():
 
                         conn.execute('UPDATE orders SET status = ? WHERE id = ?', ('CLOSED', order['id']))
                         conn.commit()
-                        print(f"Stop-loss triggered for order {order['order_id']}")
+                        logging.info(f"Stop-loss triggered for order {order['order_id']}")
                         continue
 
                     new_stoploss_price = new_price * (1 - stoploss_percent / 100)
@@ -121,7 +129,7 @@ def background_price_refresher():
                     conn.commit()
 
                 except Exception as e:
-                    print(f"Error processing order {order['order_id']} in background: {e}")
+                    logging.error(f"Error processing order {order['order_id']} in background: {e}")
 
             conn.close()
 
@@ -213,7 +221,7 @@ def place_order():
                 api_version="v2",
                 body=upstox_client.PlaceOrderRequest(
                     quantity=int(request.form['quantity']),
-                    product={"MIS": "I", "CNC": "D"}.get(request.form['product'], "I"),
+                    product=get_upstox_product(request.form['product']),
                     validity="DAY",
                     price=float(request.form['price']) if request.form['price'] else 0,
                     instrument_token=instrument_token,

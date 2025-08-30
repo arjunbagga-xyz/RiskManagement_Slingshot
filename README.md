@@ -72,6 +72,19 @@ python src/app.py
 
 The application will be available at `http://localhost:5000`.
 
+### Production Deployment
+
+For a production deployment, it is recommended to use a proper WSGI server like Gunicorn or uWSGI instead of Flask's built-in development server.
+
+Example with Gunicorn:
+```bash
+gunicorn --workers 4 --bind 0.0.0.0:8000 "src.app:app"
+```
+
+### Logging
+
+The application logs important events and errors to `app.log`. Check this file for any issues, especially with the background price refresher.
+
 ## Token Refresh
 
 Please refer to the `TOKEN_REFRESH.md` file for a detailed explanation of the token refresh mechanisms for Zerodha and Upstox.
