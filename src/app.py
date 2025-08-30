@@ -5,7 +5,7 @@ import os
 import time
 import threading
 import logging
-from src.db import get_db_connection, update_instrument_list
+from db import get_db_connection, update_instrument_list
 
 app = Flask(__name__, template_folder='../templates', static_folder='../static')
 app.secret_key = os.urandom(24)
