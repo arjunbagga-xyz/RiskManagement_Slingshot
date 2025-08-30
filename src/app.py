@@ -177,6 +177,10 @@ def callback_upstox():
         flash(f"Error during Upstox authentication: {e}", "error")
         return redirect('/login')
 
+@app.route('/login')
+def login():
+    return render_template('login.html')
+
 @app.route('/')
 def index():
     is_logged_in = session.get('logged_in_broker') is not None
