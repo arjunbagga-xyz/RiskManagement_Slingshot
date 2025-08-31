@@ -1,0 +1,45 @@
+{% extends 'base.html' %}
+
+{% block title %}Settings{% endblock %}
+
+{% block content %}
+<div class="glass-panel">
+    <h1>API Key Configuration</h1>
+    <p>Enter your API keys and secrets from your broker's developer portal. The values are encrypted before being saved.</p>
+    <form action="/settings" method="post" id="settings-form">
+        <h2>Zerodha</h2>
+        <div class="form-grid">
+            <div class="form-column">
+                <label for="zerodha_api_key">API Key:</label><br>
+                <input type="password" id="zerodha_api_key" name="zerodha_api_key" value="{{ settings.get('ZERODHA_API_KEY', '') }}"><br>
+            </div>
+            <div class="form-column">
+                <label for="zerodha_api_secret">API Secret:</label><br>
+                <input type="password" id="zerodha_api_secret" name="zerodha_api_secret" value="{{ settings.get('ZERODHA_API_SECRET', '') }}"><br>
+            </div>
+        </div>
+
+        <h2>Upstox</h2>
+        <div class="form-grid">
+            <div class="form-column">
+                <label for="upstox_api_key">API Key:</label><br>
+                <input type="password" id="upstox_api_key" name="upstox_api_key" value="{{ settings.get('UPSTOX_API_KEY', '') }}"><br>
+            </div>
+            <div class="form-column">
+                <label for="upstox_api_secret">API Secret:</label><br>
+                <input type="password" id="upstox_api_secret" name="upstox_api_secret" value="{{ settings.get('UPSTOX_API_SECRET', '') }}"><br>
+            </div>
+        </div>
+         <div class="form-grid">
+            <div class="form-column">
+                <label for="upstox_redirect_uri">Redirect URI:</label><br>
+                <input type="text" id="upstox_redirect_uri" name="upstox_redirect_uri" value="{{ settings.get('UPSTOX_REDIRECT_URI', 'http://localhost:5000/callback/upstox') }}"><br>
+            </div>
+        </div>
+
+        <div class="submit-container">
+            <input type="submit" value="Save Settings">
+        </div>
+    </form>
+</div>
+{% endblock %}

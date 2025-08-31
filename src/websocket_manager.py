@@ -9,11 +9,12 @@ import websocket
 
 class WebSocketManager(threading.Thread):
     """Base class for WebSocket managers for different brokers."""
-    def __init__(self, broker, access_token, order_queue, api_key=None):
+    def __init__(self, broker, access_token, order_queue, api_key=None, broker_api=None):
         super().__init__()
         self.broker = broker
         self.access_token = access_token
         self.api_key = api_key
+        self.broker_api = broker_api
         self.order_queue = order_queue
         self.ws = None
         self.running = False
@@ -48,6 +49,50 @@ class WebSocketManager(threading.Thread):
         """This method is called when a new tick is received."""
         # This logic is now broker-specific
         raise NotImplementedError("Subclasses must implement the on_tick method.")
+
+    def sync_order_status(self):
+        """
+        Queries the broker for the status of all open orders and updates the local database.
+        """
+        logging.info(f"[{self.broker}] Syncing order status for open orders...")
+        conn = get_db_connection()
+        open_orders = conn.execute('SELECT id, order_id FROM orders WHERE status = "OPEN"').fetchall()
+
+        if not open_orders:
+            logging.info(f"[{self.broker}] No open orders to sync.")
+            conn.close()
+            return
+
+        for order in open_orders:
+            try:
+                broker_status = None
+                if self.broker == 'Zerodha':
+                    order_history = self.broker_api.order_history(order_id=order['order_id'])
+                    if order_history:
+                        broker_status = order_history[-1]['status']
+
+                elif self.broker == 'Upstox':
+                    api_response = self.broker_api.get_order_details(api_version="v2", order_id=order['order_id'])
+                    broker_status = api_response.data.status
+
+                if broker_status:
+                    logging.info(f"  - Order {order['order_id']}: Local Status=OPEN, Broker Status={broker_status}")
+                    # If the order is filled on the broker side, close it locally
+                    if broker_status.upper() in ['COMPLETE', 'FILLED']:
+                        conn.execute('UPDATE orders SET status = ? WHERE id = ?', ('CLOSED', order['id']))
+                        conn.commit()
+                        logging.info(f"    - Updated order {order['order_id']} to CLOSED.")
+                    # If the order was cancelled or rejected, mark it as such
+                    elif broker_status.upper() in ['CANCELLED', 'REJECTED']:
+                        conn.execute('UPDATE orders SET status = ? WHERE id = ?', (broker_status.upper(), order['id']))
+                        conn.commit()
+                        logging.info(f"    - Updated order {order['order_id']} to {broker_status.upper()}.")
+
+            except Exception as e:
+                logging.error(f"Error syncing status for order {order['order_id']}: {e}")
+
+        conn.close()
+        logging.info(f"[{self.broker}] Order sync complete.")
 
     def process_tick(self, instrument_token, tick_data):
         """Shared logic to process a tick for any broker."""
@@ -156,6 +201,7 @@ class ZerodhaWebSocketManager(WebSocketManager):
 
     def _on_connect(self, ws, response):
         logging.info("Zerodha WebSocket connected.")
+        self.sync_order_status()
         self._resubscribe()
 
     def on_tick(self, ticks):
@@ -190,6 +236,7 @@ class UpstoxWebSocketManager(WebSocketManager):
 
     def _on_open(self, ws):
         logging.info("Upstox WebSocket connected.")
+        self.sync_order_status()
         self._resubscribe()
 
     def on_message(self, ws, message):

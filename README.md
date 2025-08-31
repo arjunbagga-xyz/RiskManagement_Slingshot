@@ -37,20 +37,17 @@ The application uses a multi-threaded architecture to handle real-time data proc
 
 ## Configuration
 
-To connect to the broker APIs, you need to set the following environment variables. You can get your API keys from the developer portals of Zerodha and Upstox.
+After running the application for the first time, navigate to the **Settings** page. Here, you can enter and save your API keys from the developer portals of Zerodha and Upstox. The application will store them securely in its local database.
 
-### For Zerodha:
-- `ZERODHA_API_KEY`: Your Zerodha Kite Connect API key.
-- `ZERODHA_API_SECRET`: Your Zerodha Kite Connect API secret.
+You will need to provide:
+- Zerodha API Key & API Secret
+- Upstox API Key, API Secret, and Redirect URI
 
-### For Upstox:
-- `UPSTOX_API_KEY`: Your Upstox API key.
-- `UPSTOX_API_SECRET`: Your Upstox API secret.
-- `UPSTOX_REDIRECT_URI`: The redirect URI you configured in your Upstox developer app (e.g., `http://localhost:5000/callback/upstox`).
+The application will need to be restarted after saving the settings for the changes to take effect.
 
 ## How to Run the Application
 
-Once you have installed the dependencies and configured the environment variables, you can run the application with the following command:
+Once you have installed the dependencies, you can run the application with the following command:
 
 ```bash
 python src/app.py
@@ -65,3 +62,86 @@ The application logs important events and errors to `app.log`. Check this file f
 ## Brainstorming and Future Enhancements
 
 For more detailed discussions on application features and architecture, please see the `BRAINSTORM.md` file.
+
+---
+
+## Creating a Standalone Executable
+
+You can package this application into a single executable file (`.exe`) for easy distribution and execution. This allows you to run the application without needing to have Python or the dependencies installed separately. The executable will run as a background process.
+
+### 1. Install PyInstaller
+First, ensure you have PyInstaller installed in your environment:
+```bash
+pip install pyinstaller
+```
+
+### 2. Create the Spec File
+Create a file named `RealTimeTradingTool.spec` in the root directory of the project with the following content. This file tells PyInstaller how to build your application.
+
+```python
+# RealTimeTradingTool.spec
+# -*- mode: python ; coding: utf-8 -*-
+
+block_cipher = None
+
+a = Analysis(
+    ['src/app.py'],
+    pathex=[],
+    binaries=[],
+    datas=[],
+    hiddenimports=[],
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=[],
+    win_no_prefer_redirects=False,
+    win_private_assemblies=False,
+    cipher=block_cipher,
+    noarchive=False,
+)
+
+# Add data files (templates, static assets, and schema)
+a.datas += [
+    ('templates', 'templates', 'DATA'),
+    ('static', 'static', 'DATA'),
+    ('schema.sql', 'schema.sql', 'DATA')
+]
+
+pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+
+exe = EXE(
+    pyz,
+    a.scripts,
+    [],
+    exclude_binaries=True,
+    name='RealTimeTradingTool',
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=True,
+    console=False, # This creates a windowed (no console) application
+    disable_windowed_traceback=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+)
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    name='RealTimeTradingTool',
+)
+```
+
+### 3. Build the Executable
+Run PyInstaller from your terminal in the project's root directory, pointing it to the spec file you just created:
+```bash
+pyinstaller RealTimeTradingTool.spec
+```
+
+### 4. Run the Application
+Once the build process is complete, you will find the executable inside the `dist/RealTimeTradingTool` directory (or `dist/RealTimeTradingTool.exe` on Windows). You can now run this file directly to start the application. Use the "Exit Application" button in the UI to gracefully shut down the server.

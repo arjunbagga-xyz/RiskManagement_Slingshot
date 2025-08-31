@@ -24,3 +24,14 @@ CREATE TABLE instruments (
     broker TEXT NOT NULL,
     PRIMARY KEY (trading_symbol, exchange, broker)
 );
+
+DROP TABLE IF EXISTS settings;
+CREATE TABLE settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
+DROP TABLE IF EXISTS encryption_key;
+CREATE TABLE encryption_key (
+    key BLOB NOT NULL
+);

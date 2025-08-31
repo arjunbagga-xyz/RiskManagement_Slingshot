@@ -8,6 +8,7 @@ import logging
 import queue
 from db import get_db_connection, update_instrument_list
 from websocket_manager import ZerodhaWebSocketManager, UpstoxWebSocketManager
+from security import encrypt_value, decrypt_value
 
 app = Flask(__name__, template_folder='../templates', static_folder='../static')
 app.secret_key = os.urandom(24)
@@ -15,12 +16,29 @@ app.secret_key = os.urandom(24)
 # --- Logging ---
 logging.basicConfig(filename='app.log', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# --- Configuration ---
-ZERODHA_API_KEY = os.getenv("ZERODHA_API_KEY", "your_zerodha_api_key")
-ZERODHA_API_SECRET = os.getenv("ZERODHA_API_SECRET", "your_zerodha_api_secret")
-UPSTOX_API_KEY = os.getenv("UPSTOX_API_KEY", "your_upstox_api_key")
-UPSTOX_API_SECRET = os.getenv("UPSTOX_API_SECRET", "your_upstox_api_secret")
-UPSTOX_REDIRECT_URI = os.getenv("UPSTOX_REDIRECT_URI", "http://localhost:5000/callback/upstox")
+# --- Configuration Loading ---
+def load_settings_from_db():
+    """Loads all settings from the database and returns them as a dict."""
+    try:
+        conn = get_db_connection()
+        settings_from_db = conn.execute('SELECT key, value FROM settings').fetchall()
+        conn.close()
+
+        settings = {}
+        for row in settings_from_db:
+            settings[row['key']] = decrypt_value(row['value'])
+        return settings
+    except Exception as e:
+        logging.error(f"Could not load settings from database: {e}. Please run the app and configure via /settings.")
+        return {}
+
+APP_SETTINGS = load_settings_from_db()
+
+ZERODHA_API_KEY = APP_SETTINGS.get("ZERODHA_API_KEY")
+ZERODHA_API_SECRET = APP_SETTINGS.get("ZERODHA_API_SECRET")
+UPSTOX_API_KEY = APP_SETTINGS.get("UPSTOX_API_KEY")
+UPSTOX_API_SECRET = APP_SETTINGS.get("UPSTOX_API_SECRET")
+UPSTOX_REDIRECT_URI = APP_SETTINGS.get("UPSTOX_REDIRECT_URI", "http://localhost:5000/callback/upstox")
 
 # --- Global variables for access tokens & websocket managers (simplified for single-user context) ---
 ACCESS_TOKENS = {
@@ -37,7 +55,37 @@ def get_upstox_product(product_str):
     return {"MIS": "I", "CNC": "D", "NRML": "I"}.get(product_str, "I")
 
 # --- Zerodha Login ---
-kite = KiteConnect(api_key=ZERODHA_API_KEY)
+# Initialize KiteConnect. It will be updated with the API key from settings.
+kite = KiteConnect(api_key=None)
+
+# --- Settings Management ---
+def get_all_settings():
+    conn = get_db_connection()
+    settings_from_db = conn.execute('SELECT key, value FROM settings').fetchall()
+    conn.close()
+    settings = {}
+    for row in settings_from_db:
+        # We just want to know if the key exists, not its value here
+        # So we'll decrypt but just store a placeholder if it's not empty
+        decrypted_value = decrypt_value(row['value'])
+        if decrypted_value:
+            settings[row['key']] = "********" # Placeholder for UI
+    # Also get the non-secret redirect URI
+    redirect_uri_row = next((r for r in settings_from_db if r['key'] == 'UPSTOX_REDIRECT_URI'), None)
+    if redirect_uri_row:
+        settings['UPSTOX_REDIRECT_URI'] = decrypt_value(redirect_uri_row['value'])
+
+    return settings
+
+def save_setting(key, value):
+    if not value: # Don't save empty strings
+        return
+    encrypted_value = encrypt_value(value)
+    conn = get_db_connection()
+    # The value from encrypt_value is bytes, but sqlite will store it as TEXT
+    conn.execute('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', (key, encrypted_value.decode('utf-8')))
+    conn.commit()
+    conn.close()
 
 # --- Order Queue for Thread-Safe Order Placement ---
 order_queue = queue.Queue()
@@ -108,13 +156,24 @@ def order_placement_worker():
 
 @app.route('/login/zerodha')
 def login_zerodha():
+    # Dynamically update the api_key before generating the login URL
+    kite.api_key = APP_SETTINGS.get("ZERODHA_API_KEY")
+    if not kite.api_key:
+        flash("Zerodha API Key is not configured. Please configure it in Settings.", "error")
+        return redirect('/settings')
     return redirect(kite.login_url())
 
 @app.route('/callback/zerodha')
 def callback_zerodha():
     request_token = request.args.get('request_token')
     try:
-        data = kite.generate_session(request_token, api_secret=ZERODHA_API_SECRET)
+        # Use the globally loaded secret key
+        api_secret = APP_SETTINGS.get("ZERODHA_API_SECRET")
+        if not api_secret:
+            flash("Zerodha API Secret is not configured.", "error")
+            return redirect('/settings')
+
+        data = kite.generate_session(request_token, api_secret=api_secret)
         access_token = data['access_token']
         ACCESS_TOKENS["zerodha"] = access_token
         session['logged_in_broker'] = 'Zerodha'
@@ -122,7 +181,13 @@ def callback_zerodha():
         if WEBSOCKET_MANAGERS['zerodha']:
             WEBSOCKET_MANAGERS['zerodha'].stop()
 
-        WEBSOCKET_MANAGERS['zerodha'] = ZerodhaWebSocketManager(access_token, ZERODHA_API_KEY, order_queue)
+        WEBSOCKET_MANAGERS['zerodha'] = ZerodhaWebSocketManager(
+            broker='Zerodha',
+            access_token=access_token,
+            order_queue=order_queue,
+            api_key=kite.api_key,
+            broker_api=kite
+        )
         WEBSOCKET_MANAGERS['zerodha'].start()
 
         kite.set_access_token(access_token)
@@ -136,7 +201,12 @@ def callback_zerodha():
 
 @app.route('/login/upstox')
 def login_upstox():
-    auth_url = f"https://api.upstox.com/v2/login/authorization/dialog?response_type=code&client_id={UPSTOX_API_KEY}&redirect_uri={UPSTOX_REDIRECT_URI}"
+    api_key = APP_SETTINGS.get("UPSTOX_API_KEY")
+    redirect_uri = APP_SETTINGS.get("UPSTOX_REDIRECT_URI")
+    if not api_key or not redirect_uri:
+        flash("Upstox API Key or Redirect URI is not configured. Please configure it in Settings.", "error")
+        return redirect('/settings')
+    auth_url = f"https://api.upstox.com/v2/login/authorization/dialog?response_type=code&client_id={api_key}&redirect_uri={redirect_uri}"
     return redirect(auth_url)
 
 @app.route('/callback/upstox')
@@ -144,12 +214,20 @@ def callback_upstox():
     code = request.args.get('code')
     api_instance = upstox_client.LoginApi()
     try:
+        api_key = APP_SETTINGS.get("UPSTOX_API_KEY")
+        api_secret = APP_SETTINGS.get("UPSTOX_API_SECRET")
+        redirect_uri = APP_SETTINGS.get("UPSTOX_REDIRECT_URI")
+
+        if not all([api_key, api_secret, redirect_uri]):
+            flash("Upstox API settings are not fully configured.", "error")
+            return redirect('/settings')
+
         api_response = api_instance.token(
             api_version="v2",
             code=code,
-            client_id=UPSTOX_API_KEY,
-            client_secret=UPSTOX_API_SECRET,
-            redirect_uri=UPSTOX_REDIRECT_URI,
+            client_id=api_key,
+            client_secret=api_secret,
+            redirect_uri=redirect_uri,
             grant_type='authorization_code'
         )
         access_token = api_response.access_token
@@ -159,7 +237,18 @@ def callback_upstox():
         if WEBSOCKET_MANAGERS['upstox']:
             WEBSOCKET_MANAGERS['upstox'].stop()
 
-        WEBSOCKET_MANAGERS['upstox'] = UpstoxWebSocketManager(access_token, order_queue)
+        # Create an API client for Upstox to pass to the manager
+        configuration = upstox_client.Configuration()
+        configuration.access_token = access_token
+        upstox_api_client = upstox_client.ApiClient(configuration)
+        upstox_order_api = upstox_client.OrderApi(upstox_api_client)
+
+        WEBSOCKET_MANAGERS['upstox'] = UpstoxWebSocketManager(
+            broker='Upstox',
+            access_token=access_token,
+            order_queue=order_queue,
+            broker_api=upstox_order_api
+        )
         WEBSOCKET_MANAGERS['upstox'].start()
 
         message = update_instrument_list('Upstox', kite_instance=None)
@@ -282,6 +371,24 @@ def logout():
     flash("You have been logged out.", "success")
     return redirect('/')
 
+@app.route('/settings', methods=['GET', 'POST'])
+def settings():
+    if request.method == 'POST':
+        # Save settings from the form
+        save_setting('ZERODHA_API_KEY', request.form.get('zerodha_api_key'))
+        save_setting('ZERODHA_API_SECRET', request.form.get('zerodha_api_secret'))
+        save_setting('UPSTOX_API_KEY', request.form.get('upstox_api_key'))
+        save_setting('UPSTOX_API_SECRET', request.form.get('upstox_api_secret'))
+        save_setting('UPSTOX_REDIRECT_URI', request.form.get('upstox_redirect_uri'))
+
+        flash("Settings saved successfully. Please restart the application for changes to take effect.", "success")
+        return redirect('/settings')
+
+    # For GET request
+    is_logged_in = session.get('logged_in_broker') is not None
+    current_settings = get_all_settings()
+    return render_template('settings.html', is_logged_in=is_logged_in, settings=current_settings)
+
 @app.route('/api/symbols')
 def api_symbols():
     broker = session.get('logged_in_broker')
@@ -292,6 +399,24 @@ def api_symbols():
     symbols = conn.execute('SELECT trading_symbol FROM instruments WHERE broker = ?', (broker,)).fetchall()
     conn.close()
     return jsonify([s['trading_symbol'] for s in symbols])
+
+@app.route('/shutdown')
+def shutdown():
+    shutdown_func = request.environ.get('werkzeug.server.shutdown')
+    if shutdown_func is None:
+        flash('Cannot shut down server. Not running with the Werkzeug Server.', 'error')
+        return redirect('/')
+
+    # Stop the websocket managers gracefully
+    for manager in WEBSOCKET_MANAGERS.values():
+        if manager and manager.is_alive():
+            manager.stop()
+
+    # Stop the order placement worker
+    order_queue.put(None)
+
+    shutdown_func()
+    return "Server shutting down..."
 
 # Start the background worker thread for order placement
 order_worker_thread = threading.Thread(target=order_placement_worker, daemon=True)
