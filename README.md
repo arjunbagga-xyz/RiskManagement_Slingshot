@@ -1,17 +1,20 @@
-# Trading Tool with Trailing Stop-Loss
+# Real-Time Trading Tool with Trailing Stop-Loss
 
-This is a web-based trading tool that allows you to connect to Zerodha and Upstox, place orders, and manage risk with a trailing stop-loss mechanism. The application features a modern, glassmorphism-themed UI for a better user experience.
+This is a web-based trading tool that allows you to connect to Zerodha and Upstox, place orders, and manage risk with a real-time, streaming trailing stop-loss mechanism. The application features a modern, "flashy" UI for a better user experience.
 
 ## Features
 
-- **Modern UI:** A sleek and modern user interface with a glassmorphism theme.
-- **Searchable Symbol List:** Quickly find and select trading symbols with a searchable, autocomplete input field.
+- **Real-Time Trailing Stop-Loss:** The application uses a persistent WebSocket connection to the broker's streaming API to monitor your open positions in real-time. The trailing stop-loss is updated with every price tick, providing a fast and efficient way to manage risk.
+- **Modern UI:** A sleek and modern user interface with a dark, neon-accented theme.
+- **Searchable Symbol List:** Quickly find and select trading symbols with a searchable, autocomplete input field that is populated with broker-specific instruments.
 - **Dynamic Order Form:** The order form intelligently enables or disables options based on your selections to prevent invalid order combinations.
 - **Broker Integration:** Login with your Zerodha or Upstox account.
-- **Order Placement:** Place different types of orders (Market, Limit, SL, SL-M).
-- **Trailing Stop-Loss:** Automatically manage your risk with a trailing stop-loss that adjusts as the price moves in your favor.
+- **Order Placement:** Place Market and Limit orders.
 - **Order Tracking:** View your placed orders and their current status in a clean, themed table.
-- **Web-based UI:** A simple and intuitive user interface built with Flask.
+
+## Architecture
+
+The application uses a multi-threaded architecture to handle real-time data processing. When a user logs in, a dedicated WebSocket manager thread is started for that session. This thread maintains a persistent connection to the broker's streaming API. When an order is placed, the application subscribes to the market data for that instrument. The trailing stop-loss logic is executed in the WebSocket manager's `on_tick` handler, ensuring that stop-loss decisions are made with minimal latency.
 
 ## Setup and Installation
 
@@ -45,29 +48,9 @@ To connect to the broker APIs, you need to set the following environment variabl
 - `UPSTOX_API_SECRET`: Your Upstox API secret.
 - `UPSTOX_REDIRECT_URI`: The redirect URI you configured in your Upstox developer app (e.g., `http://localhost:5000/callback/upstox`).
 
-**How to set environment variables:**
-
-- **On Linux/macOS:**
-  ```bash
-  export ZERODHA_API_KEY="your_key"
-  export ZERODHA_API_SECRET="your_secret"
-  # ... and so on for the other variables
-  ```
-  To make them permanent, add these lines to your `~/.bashrc` or `~/.zshrc` file.
-
-- **On Windows:**
-  ```powershell
-  $env:ZERODHA_API_KEY="your_key"
-  $env:ZERODHA_API_SECRET="your_secret"
-  # ... and so on
-  ```
-  To set them permanently, you can use the System Properties dialog.
-
 ## How to Run the Application
 
 Once you have installed the dependencies and configured the environment variables, you can run the application with the following command:
-
-**Note:** This application is designed for a single-user context. The access tokens are stored in a global variable and are not suitable for a multi-user web application.
 
 ```bash
 python src/app.py
@@ -75,19 +58,10 @@ python src/app.py
 
 The application will be available at `http://localhost:5000`.
 
-### Production Deployment
-
-For a production deployment, it is recommended to use a proper WSGI server like Gunicorn or uWSGI instead of Flask's built-in development server.
-
-Example with Gunicorn:
-```bash
-gunicorn --workers 4 --bind 0.0.0.0:8000 "src.app:app"
-```
-
 ### Logging
 
-The application logs important events and errors to `app.log`. Check this file for any issues, especially with the background price refresher.
+The application logs important events and errors to `app.log`. Check this file for any issues, especially with the WebSocket connection and price updates.
 
-## Token Refresh
+## Brainstorming and Future Enhancements
 
-A manual login is required each day to generate a new access token for both Zerodha and Upstox. For more detailed discussions on application features and architecture, please see the `BRAINSTORM.md` file.
+For more detailed discussions on application features and architecture, please see the `BRAINSTORM.md` file.

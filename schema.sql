@@ -13,7 +13,8 @@ CREATE TABLE orders (
     transaction_type TEXT,
     exchange TEXT,
     product TEXT,
-    broker TEXT NOT NULL
+        broker TEXT NOT NULL,
+        instrument_key TEXT
 );
 
 DROP TABLE IF EXISTS instruments;

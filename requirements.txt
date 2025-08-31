@@ -1,4 +1,7 @@
 Flask>=2.0
-kiteconnect
-upstox-python-sdk
+kiteconnect>=3.0
+upstox-python-sdk>=2.0
 requests
+websocket-client
+protobuf
+grpcio-tools

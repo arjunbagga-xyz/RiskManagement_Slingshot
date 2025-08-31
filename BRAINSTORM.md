@@ -23,3 +23,20 @@ The "Update Instruments" button manually triggers a refresh of the instrument li
     - **Potential for Abuse:** Frequent clicking could lead to rate-limiting by the broker's API, although this is unlikely for a single user.
 
 - **Conclusion:** The button is a valuable feature for resilience and user control. The benefits of having a manual refresh mechanism outweigh the minor UI clutter. It should be kept.
+
+---
+
+## Note 2: Real-Time Architecture with WebSockets
+
+### The Change:
+The application has been migrated from a simple HTTP polling mechanism to a real-time, WebSocket-based architecture for tracking prices and managing trailing stop-losses.
+
+### Benefits:
+- **Low Latency:** Price updates are received and processed in real-time, which is critical for a time-sensitive feature like a trailing stop-loss.
+- **Efficiency:** A single, persistent WebSocket connection is much more efficient than repeatedly making HTTP requests, reducing network overhead and resource consumption.
+- **Scalability:** The new architecture is more scalable and can handle a larger number of open positions and price updates.
+
+### Future Enhancements:
+- **Order Book Integration:** The current implementation uses the Last Traded Price (LTP) for the trailing stop-loss logic. A future enhancement could be to use order book data (bid/ask prices and depth) to make more sophisticated stop-loss decisions. This would be particularly useful for options and futures trading.
+- **Thread-Safe Order Placement:** The current implementation logs a message when a stop-loss is triggered instead of placing an order, because the WebSocket thread does not have safe access to the broker API instance. A future enhancement would be to implement a thread-safe queue to communicate from the WebSocket thread back to the main application thread, which would then place the exit order. This would complete the automation of the trailing stop-loss.
+- **More Granular Subscriptions:** The application currently subscribes to the `ltp` (or `ltpc`) feed. For certain strategies, it might be beneficial to subscribe to the `full` feed, which includes market depth, and use that data in the stop-loss logic.

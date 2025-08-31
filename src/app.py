@@ -5,7 +5,9 @@ import os
 import time
 import threading
 import logging
+import queue
 from db import get_db_connection, update_instrument_list
+from websocket_manager import ZerodhaWebSocketManager, UpstoxWebSocketManager
 
 app = Flask(__name__, template_folder='../templates', static_folder='../static')
 app.secret_key = os.urandom(24)
@@ -20,8 +22,12 @@ UPSTOX_API_KEY = os.getenv("UPSTOX_API_KEY", "your_upstox_api_key")
 UPSTOX_API_SECRET = os.getenv("UPSTOX_API_SECRET", "your_upstox_api_secret")
 UPSTOX_REDIRECT_URI = os.getenv("UPSTOX_REDIRECT_URI", "http://localhost:5000/callback/upstox")
 
-# --- Global variables for access tokens (simplified for single-user context) ---
+# --- Global variables for access tokens & websocket managers (simplified for single-user context) ---
 ACCESS_TOKENS = {
+    "zerodha": None,
+    "upstox": None
+}
+WEBSOCKET_MANAGERS = {
     "zerodha": None,
     "upstox": None
 }
@@ -33,105 +39,66 @@ def get_upstox_product(product_str):
 # --- Zerodha Login ---
 kite = KiteConnect(api_key=ZERODHA_API_KEY)
 
-# --- Background Price Refresher ---
-def background_price_refresher():
+# --- Order Queue for Thread-Safe Order Placement ---
+order_queue = queue.Queue()
+
+def order_placement_worker():
     while True:
-        time.sleep(10)
-        with app.app_context():
-            conn = get_db_connection()
-            orders = conn.execute('SELECT * FROM orders WHERE status = "OPEN"').fetchall()
+        order_details = order_queue.get()
+        if order_details is None:
+            break
 
-            if not orders:
-                conn.close()
-                continue
+        broker = order_details['broker']
 
-            broker = orders[0]['broker']
-            access_token = ACCESS_TOKENS.get(broker.lower())
-
-            if not access_token:
-                conn.close()
-                continue
-
-            for order in orders:
-                try:
-                    new_price = 0
-                    if order['broker'] == 'Zerodha':
-                        kite.set_access_token(access_token)
-                        instrument = f"{order['exchange']}:{order['symbol']}"
-                        ltp_data = kite.ltp(instrument)
-                        if ltp_data and instrument in ltp_data:
-                            new_price = ltp_data[instrument]['last_price']
-
-                    elif order['broker'] == 'Upstox':
-                        instrument = conn.execute('SELECT instrument_key FROM instruments WHERE trading_symbol = ? AND exchange = ?',
-                                                  (order['symbol'].upper(), order['exchange'].upper())).fetchone()
-                        if instrument:
-                            instrument_token = instrument['instrument_key']
-                            configuration = upstox_client.Configuration()
-                            configuration.access_token = access_token
-                            market_quote_api = upstox_client.MarketQuoteApi(upstox_client.ApiClient(configuration))
-                            api_response = market_quote_api.get_ltp(api_version="v2", instrument_key=instrument_token)
-                            new_price = api_response.data.last_price
-
-                    if new_price == 0:
+        try:
+            with app.app_context():
+                if broker == 'Zerodha':
+                    access_token = ACCESS_TOKENS.get('zerodha')
+                    if not access_token:
+                        logging.error("Zerodha access token not found for order placement.")
                         continue
-
-                    initial_price = float(order['price'])
-                    stoploss_percent = float(order['initial_stoploss'])
-                    current_stoploss_price = float(order['current_stoploss_price'] or initial_price * (1 - stoploss_percent / 100))
-
-                    if new_price <= current_stoploss_price:
-                        exit_transaction_type = 'SELL' if order['transaction_type'] == 'BUY' else 'BUY'
-                        if order['broker'] == 'Zerodha':
-                            kite.place_order(
-                                variety="regular", exchange=order['exchange'],
-                                tradingsymbol=order['symbol'],
-                                transaction_type=exit_transaction_type,
-                                quantity=order['quantity'],
-                                product=order['product'],
-                                order_type='MARKET'
-                            )
-                        elif order['broker'] == 'Upstox':
-                            instrument = conn.execute('SELECT instrument_key FROM instruments WHERE trading_symbol = ? AND exchange = ?',
-                                                      (order['symbol'].upper(), order['exchange'].upper())).fetchone()
-                            if instrument:
-                                instrument_token = instrument['instrument_key']
-                                configuration = upstox_client.Configuration()
-                                configuration.access_token = access_token
-                                api_instance = upstox_client.OrderApi(upstox_client.ApiClient(configuration))
-                                api_instance.place_order(
-                                    api_version="v2",
-                                    body=upstox_client.PlaceOrderRequest(
-                                        quantity=order['quantity'],
-                                        product=get_upstox_product(order['product']),
-                                        validity="DAY",
-                                        instrument_token=instrument_token,
-                                        order_type='MARKET',
-                                        transaction_type='s' if exit_transaction_type == 'SELL' else 'b'
-                                    )
-                                )
-
-                        conn.execute('UPDATE orders SET status = ? WHERE id = ?', ('CLOSED', order['id']))
-                        conn.commit()
-                        logging.info(f"Stop-loss triggered for order {order['order_id']}")
-                        continue
-
-                    new_stoploss_price = new_price * (1 - stoploss_percent / 100)
-                    if new_stoploss_price > current_stoploss_price:
-                        current_stoploss_price = new_stoploss_price
-
-                    profit = ((new_price - initial_price) / initial_price) * 100
-
-                    conn.execute(
-                        'UPDATE orders SET price = ?, current_stoploss_price = ?, potential_profit = ? WHERE id = ?',
-                        (new_price, current_stoploss_price, profit, order['id'])
+                    kite.set_access_token(access_token)
+                    kite.place_order(
+                        variety="regular", exchange=order_details['exchange'],
+                        tradingsymbol=order_details['symbol'],
+                        transaction_type=order_details['transaction_type'],
+                        quantity=order_details['quantity'],
+                        product=order_details['product'],
+                        order_type='MARKET'
                     )
-                    conn.commit()
+                elif broker == 'Upstox':
+                    access_token = ACCESS_TOKENS.get('upstox')
+                    if not access_token:
+                        logging.error("Upstox access token not found for order placement.")
+                        continue
 
-                except Exception as e:
-                    logging.error(f"Error processing order {order['order_id']} in background: {e}")
+                    configuration = upstox_client.Configuration()
+                    configuration.access_token = access_token
+                    api_instance = upstox_client.OrderApi(upstox_client.ApiClient(configuration))
+                    api_instance.place_order(
+                        api_version="v2",
+                        body=upstox_client.PlaceOrderRequest(
+                            quantity=order_details['quantity'],
+                            product=get_upstox_product(order_details['product']),
+                            validity="DAY",
+                            instrument_token=order_details['instrument_key'],
+                            order_type='MARKET',
+                            transaction_type='s' if order_details['transaction_type'] == 'SELL' else 'b'
+                        )
+                    )
 
-            conn.close()
+                logging.info(f"Stop-loss order placed for {order_details['symbol']}.")
+
+                # Update the order status in the database
+                conn = get_db_connection()
+                conn.execute('UPDATE orders SET status = ? WHERE id = ?', ('CLOSED', order_details['order_id']))
+                conn.commit()
+                conn.close()
+
+        except Exception as e:
+            logging.error(f"Error placing stop-loss order from worker: {e}")
+        finally:
+            order_queue.task_done()
 
 
 @app.route('/login/zerodha')
@@ -143,9 +110,17 @@ def callback_zerodha():
     request_token = request.args.get('request_token')
     try:
         data = kite.generate_session(request_token, api_secret=ZERODHA_API_SECRET)
-        ACCESS_TOKENS["zerodha"] = data['access_token']
+        access_token = data['access_token']
+        ACCESS_TOKENS["zerodha"] = access_token
         session['logged_in_broker'] = 'Zerodha'
-        kite.set_access_token(data['access_token'])
+
+        if WEBSOCKET_MANAGERS['zerodha']:
+            WEBSOCKET_MANAGERS['zerodha'].stop()
+
+        WEBSOCKET_MANAGERS['zerodha'] = ZerodhaWebSocketManager(access_token, ZERODHA_API_KEY, order_queue)
+        WEBSOCKET_MANAGERS['zerodha'].start()
+
+        kite.set_access_token(access_token)
         message = update_instrument_list('Zerodha', kite)
         flash(message, "info")
         flash("Successfully logged in with Zerodha.", "success")
@@ -172,9 +147,17 @@ def callback_upstox():
             redirect_uri=UPSTOX_REDIRECT_URI,
             grant_type='authorization_code'
         )
-        ACCESS_TOKENS["upstox"] = api_response.access_token
+        access_token = api_response.access_token
+        ACCESS_TOKENS["upstox"] = access_token
         session['logged_in_broker'] = 'Upstox'
-        message = update_instrument_list('Upstox')
+
+        if WEBSOCKET_MANAGERS['upstox']:
+            WEBSOCKET_MANAGERS['upstox'].stop()
+
+        WEBSOCKET_MANAGERS['upstox'] = UpstoxWebSocketManager(access_token, order_queue)
+        WEBSOCKET_MANAGERS['upstox'].start()
+
+        message = update_instrument_list('Upstox', kite_instance=None)
         flash(message, "info")
         flash("Successfully logged in with Upstox.", "success")
         return redirect('/')
@@ -241,11 +224,19 @@ def place_order():
             )
             order_id = api_response.data.order_id
 
+        instrument_key_to_store = instrument_token if broker == 'Upstox' else conn.execute('SELECT instrument_key FROM instruments WHERE trading_symbol = ? AND exchange = ? AND broker = ?', (request.form['symbol'].upper(), request.form['exchange'].upper(), broker)).fetchone()['instrument_key']
+
         conn.execute(
-            'INSERT INTO orders (order_id, symbol, quantity, price, initial_stoploss, current_stoploss, status, broker, transaction_type, exchange, product) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            (order_id, request.form['symbol'], int(request.form['quantity']), float(request.form['price'] or 0), float(request.form['stoploss']), float(request.form['stoploss']), 'OPEN', broker, request.form['transaction_type'], request.form['exchange'], request.form['product'])
+            'INSERT INTO orders (order_id, symbol, quantity, price, initial_stoploss, current_stoploss, status, broker, transaction_type, exchange, product, instrument_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            (order_id, request.form['symbol'], int(request.form['quantity']), float(request.form['price'] or 0), float(request.form['stoploss']), float(request.form['stoploss']), 'OPEN', broker, request.form['transaction_type'], request.form['exchange'], request.form['product'], instrument_key_to_store)
         )
         conn.commit()
+
+        # Subscribe to the instrument's ticks
+        ws_manager = WEBSOCKET_MANAGERS.get(broker.lower())
+        if ws_manager:
+            ws_manager.subscribe([instrument_key_to_store])
+
         flash(f"{broker} order placed successfully! Order ID: {order_id}", "success")
 
     except Exception as e:
@@ -294,6 +285,6 @@ def api_symbols():
     return jsonify([s['trading_symbol'] for s in symbols])
 
 if __name__ == '__main__':
-    refresher_thread = threading.Thread(target=background_price_refresher, daemon=True)
-    refresher_thread.start()
+    order_worker_thread = threading.Thread(target=order_placement_worker, daemon=True)
+    order_worker_thread.start()
     app.run(debug=True, port=5000)
