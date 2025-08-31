@@ -146,7 +146,8 @@ def callback_zerodha():
         ACCESS_TOKENS["zerodha"] = data['access_token']
         session['logged_in_broker'] = 'Zerodha'
         kite.set_access_token(data['access_token'])
-        update_instrument_list('Zerodha', kite)
+        message = update_instrument_list('Zerodha', kite)
+        flash(message, "info")
         flash("Successfully logged in with Zerodha.", "success")
         return redirect('/')
     except Exception as e:
@@ -173,7 +174,8 @@ def callback_upstox():
         )
         ACCESS_TOKENS["upstox"] = api_response.access_token
         session['logged_in_broker'] = 'Upstox'
-        update_instrument_list('Upstox')
+        message = update_instrument_list('Upstox')
+        flash(message, "info")
         flash("Successfully logged in with Upstox.", "success")
         return redirect('/')
     except Exception as e:

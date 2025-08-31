@@ -18,6 +18,7 @@ def init_db():
     conn.close()
 
 def update_upstox_instruments():
+    logging.info("Starting Upstox instrument list update...")
     url = "https://assets.upstox.com/market-quote/instruments/exchange/complete.json.gz"
     try:
         response = requests.get(url)
@@ -29,6 +30,7 @@ def update_upstox_instruments():
         conn = get_db_connection()
         conn.execute('DELETE FROM instruments WHERE broker = ?', ('Upstox',))
 
+        count = 0
         for instrument in instrument_list:
             if instrument.get('instrument_type') == 'EQ' and instrument.get('exchange') in ['NSE', 'BSE']:
                 try:
@@ -36,23 +38,26 @@ def update_upstox_instruments():
                         'INSERT INTO instruments (instrument_key, trading_symbol, exchange, broker) VALUES (?, ?, ?, ?)',
                         (instrument['instrument_key'], instrument['trading_symbol'], instrument['exchange'], 'Upstox')
                     )
+                    count += 1
                 except sqlite3.IntegrityError:
-                    # Ignore if the instrument already exists for another broker
                     pass
 
         conn.commit()
         conn.close()
-        return "Upstox instrument list updated successfully."
+        logging.info(f"Upstox instrument list updated successfully with {count} instruments.")
+        return f"Upstox instrument list updated successfully with {count} instruments."
     except Exception as e:
         logging.error(f"Error updating Upstox instrument list: {e}")
         return f"Error updating Upstox instrument list: {e}"
 
 def update_zerodha_instruments(kite):
+    logging.info("Starting Zerodha instrument list update...")
     try:
         instruments = kite.instruments()
         conn = get_db_connection()
         conn.execute('DELETE FROM instruments WHERE broker = ?', ('Zerodha',))
 
+        count = 0
         for instrument in instruments:
             if instrument.get('instrument_type') == 'EQ' and instrument.get('exchange') in ['NSE', 'BSE']:
                 try:
@@ -60,13 +65,14 @@ def update_zerodha_instruments(kite):
                         'INSERT INTO instruments (instrument_key, trading_symbol, exchange, broker) VALUES (?, ?, ?, ?)',
                         (instrument['instrument_token'], instrument['tradingsymbol'], instrument['exchange'], 'Zerodha')
                     )
+                    count += 1
                 except sqlite3.IntegrityError:
-                    # Ignore if the instrument already exists for another broker
                     pass
 
         conn.commit()
         conn.close()
-        return "Zerodha instrument list updated successfully."
+        logging.info(f"Zerodha instrument list updated successfully with {count} instruments.")
+        return f"Zerodha instrument list updated successfully with {count} instruments."
     except Exception as e:
         logging.error(f"Error updating Zerodha instrument list: {e}")
         return f"Error updating Zerodha instrument list: {e}"
