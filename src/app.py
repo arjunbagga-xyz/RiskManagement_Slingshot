@@ -226,9 +226,13 @@ def place_order():
 
         instrument_key_to_store = instrument_token if broker == 'Upstox' else conn.execute('SELECT instrument_key FROM instruments WHERE trading_symbol = ? AND exchange = ? AND broker = ?', (request.form['symbol'].upper(), request.form['exchange'].upper(), broker)).fetchone()['instrument_key']
 
+        price = float(request.form['price'] or 0)
+        stoploss_percent = float(request.form['stoploss'])
+        initial_stoploss_price = price * (1 - stoploss_percent / 100) if price > 0 else 0
+
         conn.execute(
-            'INSERT INTO orders (order_id, symbol, quantity, price, initial_stoploss, current_stoploss, status, broker, transaction_type, exchange, product, instrument_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            (order_id, request.form['symbol'], int(request.form['quantity']), float(request.form['price'] or 0), float(request.form['stoploss']), float(request.form['stoploss']), 'OPEN', broker, request.form['transaction_type'], request.form['exchange'], request.form['product'], instrument_key_to_store)
+            'INSERT INTO orders (order_id, symbol, quantity, price, initial_stoploss, current_stoploss_price, status, broker, transaction_type, exchange, product, instrument_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            (order_id, request.form['symbol'], int(request.form['quantity']), price, stoploss_percent, initial_stoploss_price, 'OPEN', broker, request.form['transaction_type'], request.form['exchange'], request.form['product'], instrument_key_to_store)
         )
         conn.commit()
 
