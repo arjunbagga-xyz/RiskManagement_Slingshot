@@ -3,10 +3,13 @@
 {% block title %}Trading Tool{% endblock %}
 
 {% block content %}
+<div class="glass-panel">
     <h1>Place an Order</h1>
-    <form action="/place_order" method="post">
-        <label for="symbol">Symbol:</label><br>
-        <input type="text" id="symbol" name="symbol"><br>
+    <form action="/place_order" method="post" id="order-form">
+        <div class="autocomplete-container">
+            <label for="symbol">Symbol:</label><br>
+            <input type="text" id="symbol" name="symbol" autocomplete="off"><br>
+        </div>
 
         <label for="quantity">Quantity:</label><br>
         <input type="number" id="quantity" name="quantity"><br>
@@ -46,9 +49,11 @@
 
         <input type="submit" value="Place Order">
     </form>
+</div>
 
+<div class="glass-panel">
     <h2>Placed Orders</h2>
-    <a href="/update_instruments"><button>Update Instruments</button></a>
+    <a href="/update_instruments"><button class="update-button">Update Instruments</button></a>
     <table border="1">
         <thead>
             <tr>
@@ -77,4 +82,95 @@
             {% endfor %}
         </tbody>
     </table>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const symbolInput = document.getElementById('symbol');
+    let symbols = [];
+    let autocompleteList;
+
+    // Fetch symbols from the API
+    fetch('/api/symbols')
+        .then(response => response.json())
+        .then(data => {
+            symbols = data;
+        });
+
+    symbolInput.addEventListener('input', function() {
+        const value = this.value.toUpperCase();
+        closeAllLists();
+        if (!value) { return false; }
+
+        autocompleteList = document.createElement('div');
+        autocompleteList.setAttribute('class', 'autocomplete-items');
+        this.parentNode.appendChild(autocompleteList);
+
+        let count = 0;
+        for (let i = 0; i < symbols.length && count < 10; i++) {
+            if (symbols[i].toUpperCase().startsWith(value)) {
+                let item = document.createElement('div');
+                item.innerHTML = "<strong>" + symbols[i].substr(0, value.length) + "</strong>";
+                item.innerHTML += symbols[i].substr(value.length);
+                item.innerHTML += "<input type='hidden' value='" + symbols[i] + "'>";
+
+                item.addEventListener('click', function() {
+                    symbolInput.value = this.getElementsByTagName('input')[0].value;
+                    closeAllLists();
+                });
+                autocompleteList.appendChild(item);
+                count++;
+            }
+        }
+    });
+
+    function closeAllLists(elmnt) {
+        var x = document.getElementsByClassName("autocomplete-items");
+        for (var i = 0; i < x.length; i++) {
+            if (elmnt != x[i] && elmnt != symbolInput) {
+                x[i].parentNode.removeChild(x[i]);
+            }
+        }
+    }
+
+    document.addEventListener("click", function (e) {
+        closeAllLists(e.target);
+    });
+
+    // Dynamic form logic
+    const orderForm = document.getElementById('order-form');
+    const productSelect = document.getElementById('product');
+    const orderTypeSelect = document.getElementById('order_type');
+    const priceInput = document.getElementById('price');
+
+    function updateForm() {
+        // Rule 1: Product vs Order Type
+        if (productSelect.value === 'CNC') {
+            // Disable SL and SL-M for CNC
+            orderTypeSelect.querySelector('option[value="SL"]').disabled = true;
+            orderTypeSelect.querySelector('option[value="SL-M"]').disabled = true;
+            // If a disabled option was selected, switch to MARKET
+            if (orderTypeSelect.value === 'SL' || orderTypeSelect.value === 'SL-M') {
+                orderTypeSelect.value = 'MARKET';
+            }
+        } else {
+            // Enable all for other products
+            orderTypeSelect.querySelector('option[value="SL"]').disabled = false;
+            orderTypeSelect.querySelector('option[value="SL-M"]').disabled = false;
+        }
+
+        // Rule 2: Order Type vs Price Field
+        if (orderTypeSelect.value === 'MARKET') {
+            priceInput.disabled = true;
+            priceInput.value = ''; // Clear the value
+        } else {
+            priceInput.disabled = false;
+        }
+    }
+
+    orderForm.addEventListener('change', updateForm);
+    // Initial check on page load
+    updateForm();
+});
+</script>
 {% endblock %}

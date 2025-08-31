@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, session, flash
+from flask import Flask, render_template, request, redirect, session, flash, jsonify
 from kiteconnect import KiteConnect
 import upstox_client
 import os
@@ -145,6 +145,8 @@ def callback_zerodha():
         data = kite.generate_session(request_token, api_secret=ZERODHA_API_SECRET)
         ACCESS_TOKENS["zerodha"] = data['access_token']
         session['logged_in_broker'] = 'Zerodha'
+        kite.set_access_token(data['access_token'])
+        update_instrument_list('Zerodha', kite)
         flash("Successfully logged in with Zerodha.", "success")
         return redirect('/')
     except Exception as e:
@@ -171,6 +173,7 @@ def callback_upstox():
         )
         ACCESS_TOKENS["upstox"] = api_response.access_token
         session['logged_in_broker'] = 'Upstox'
+        update_instrument_list('Upstox')
         flash("Successfully logged in with Upstox.", "success")
         return redirect('/')
     except Exception as e:
@@ -251,7 +254,21 @@ def place_order():
 
 @app.route('/update_instruments')
 def update_instruments_route():
-    message = update_instrument_list()
+    broker = session.get('logged_in_broker')
+    if not broker:
+        flash("Please login first.", "error")
+        return redirect('/login')
+
+    kite_instance = None
+    if broker == 'Zerodha':
+        access_token = ACCESS_TOKENS.get('zerodha')
+        if not access_token:
+            flash("Zerodha session expired. Please login again.", "error")
+            return redirect('/login/zerodha')
+        kite.set_access_token(access_token)
+        kite_instance = kite
+
+    message = update_instrument_list(broker, kite_instance)
     flash(message, "info")
     return redirect('/')
 
@@ -262,6 +279,17 @@ def logout():
     session.clear()
     flash("You have been logged out.", "success")
     return redirect('/')
+
+@app.route('/api/symbols')
+def api_symbols():
+    broker = session.get('logged_in_broker')
+    if not broker:
+        return jsonify([])
+
+    conn = get_db_connection()
+    symbols = conn.execute('SELECT trading_symbol FROM instruments WHERE broker = ?', (broker,)).fetchall()
+    conn.close()
+    return jsonify([s['trading_symbol'] for s in symbols])
 
 if __name__ == '__main__':
     refresher_thread = threading.Thread(target=background_price_refresher, daemon=True)

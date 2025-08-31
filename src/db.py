@@ -1,4 +1,8 @@
 import sqlite3
+import requests
+import gzip
+import json
+import logging
 
 DATABASE_NAME = 'orders.db'
 
@@ -13,41 +17,7 @@ def init_db():
         conn.executescript(f.read())
     conn.close()
 
-import requests
-import gzip
-import json
-
-def create_schema_file():
-    schema = """
-    DROP TABLE IF EXISTS orders;
-    CREATE TABLE orders (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        order_id TEXT NOT NULL,
-        symbol TEXT NOT NULL,
-        quantity INTEGER NOT NULL,
-        price REAL NOT NULL,
-        initial_stoploss REAL NOT NULL,
-        current_stoploss REAL NOT NULL,
-        current_stoploss_price REAL,
-        potential_profit REAL,
-        status TEXT NOT NULL,
-        transaction_type TEXT,
-        exchange TEXT,
-        product TEXT,
-        broker TEXT NOT NULL
-    );
-
-    DROP TABLE IF EXISTS instruments;
-    CREATE TABLE instruments (
-        instrument_key TEXT PRIMARY KEY,
-        trading_symbol TEXT NOT NULL,
-        exchange TEXT NOT NULL
-    );
-    """
-    with open('schema.sql', 'w') as f:
-        f.write(schema)
-
-def update_instrument_list():
+def update_upstox_instruments():
     url = "https://assets.upstox.com/market-quote/instruments/exchange/complete.json.gz"
     try:
         response = requests.get(url)
@@ -57,22 +27,58 @@ def update_instrument_list():
         instrument_list = json.loads(decompressed_data)
 
         conn = get_db_connection()
-        conn.execute('DELETE FROM instruments') # Clear old data
+        conn.execute('DELETE FROM instruments WHERE broker = ?', ('Upstox',))
 
         for instrument in instrument_list:
             if instrument.get('instrument_type') == 'EQ' and instrument.get('exchange') in ['NSE', 'BSE']:
-                conn.execute(
-                    'INSERT INTO instruments (instrument_key, trading_symbol, exchange) VALUES (?, ?, ?)',
-                    (instrument['instrument_key'], instrument['trading_symbol'], instrument['exchange'])
-                )
+                try:
+                    conn.execute(
+                        'INSERT INTO instruments (instrument_key, trading_symbol, exchange, broker) VALUES (?, ?, ?, ?)',
+                        (instrument['instrument_key'], instrument['trading_symbol'], instrument['exchange'], 'Upstox')
+                    )
+                except sqlite3.IntegrityError:
+                    # Ignore if the instrument already exists for another broker
+                    pass
 
         conn.commit()
         conn.close()
-        return "Instrument list updated successfully."
+        return "Upstox instrument list updated successfully."
     except Exception as e:
-        return f"Error updating instrument list: {e}"
+        logging.error(f"Error updating Upstox instrument list: {e}")
+        return f"Error updating Upstox instrument list: {e}"
+
+def update_zerodha_instruments(kite):
+    try:
+        instruments = kite.instruments()
+        conn = get_db_connection()
+        conn.execute('DELETE FROM instruments WHERE broker = ?', ('Zerodha',))
+
+        for instrument in instruments:
+            if instrument.get('instrument_type') == 'EQ' and instrument.get('exchange') in ['NSE', 'BSE']:
+                try:
+                    conn.execute(
+                        'INSERT INTO instruments (instrument_key, trading_symbol, exchange, broker) VALUES (?, ?, ?, ?)',
+                        (instrument['instrument_token'], instrument['tradingsymbol'], instrument['exchange'], 'Zerodha')
+                    )
+                except sqlite3.IntegrityError:
+                    # Ignore if the instrument already exists for another broker
+                    pass
+
+        conn.commit()
+        conn.close()
+        return "Zerodha instrument list updated successfully."
+    except Exception as e:
+        logging.error(f"Error updating Zerodha instrument list: {e}")
+        return f"Error updating Zerodha instrument list: {e}"
+
+def update_instrument_list(broker, kite_instance=None):
+    if broker == 'Upstox':
+        return update_upstox_instruments()
+    elif broker == 'Zerodha' and kite_instance:
+        return update_zerodha_instruments(kite_instance)
+    else:
+        return "Invalid broker or missing Kite instance for Zerodha."
 
 if __name__ == '__main__':
-    create_schema_file()
     init_db()
     print("Database initialized.")
