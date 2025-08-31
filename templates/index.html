@@ -67,7 +67,7 @@
                 <th>Price</th>
                 <th>Status</th>
                 <th>Initial Stoploss</th>
-                <th>Current Stoploss</th>
+                <th>Current Stop-Loss Price</th>
                 <th>Potential Profit Locked In (%)</th>
             </tr>
         </thead>
@@ -77,11 +77,11 @@
                 <td>{{ order.order_id }}</td>
                 <td>{{ order.symbol }}</td>
                 <td>{{ order.quantity }}</td>
-                <td>{{ order.price }}</td>
+                <td>{{ "%.2f"|format(order.price) }}</td>
                 <td>{{ order.status }}</td>
                 <td>{{ order.initial_stoploss }}%</td>
-                <td>{{ order.current_stoploss }}%</td>
-                <td>{{ order.potential_profit }}%</td>
+                <td>{{ "%.2f"|format(order.current_stoploss_price) }}</td>
+                <td>{{ "%.2f"|format(order.potential_profit) }}%</td>
             </tr>
             {% endfor %}
         </tbody>
@@ -156,12 +156,12 @@ document.addEventListener('DOMContentLoaded', function() {
         // This is a placeholder for future logic as current products are general.
         const nrmlOption = productSelect.querySelector('option[value="NRML"]');
         if (selectedExchange === 'BSE') {
-            // nrmlOption.style.display = 'none';
-            // if (selectedProduct === 'NRML') {
-            //     productSelect.value = 'MIS'; // Change to a default
-            // }
+            nrmlOption.style.display = 'none';
+            if (selectedProduct === 'NRML') {
+                productSelect.value = 'MIS'; // Change to a default
+            }
         } else {
-            // nrmlOption.style.display = 'block';
+            nrmlOption.style.display = 'block';
         }
 
         // --- Rule 2: Order Type vs. Price Field ---

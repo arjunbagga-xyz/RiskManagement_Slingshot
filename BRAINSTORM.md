@@ -36,9 +36,11 @@ The application has been migrated from a simple HTTP polling mechanism to a real
 - **Efficiency:** A single, persistent WebSocket connection is much more efficient than repeatedly making HTTP requests, reducing network overhead and resource consumption.
 - **Scalability:** The new architecture is more scalable and can handle a larger number of open positions and price updates.
 
+### Key Implementation Details:
+- **Thread-Safe Order Placement:** When a stop-loss is triggered, the `WebSocketManager` does not place an order directly. Instead, it puts the details of the required exit order onto a thread-safe `queue`. A dedicated worker thread, running in the main application context, continuously monitors this queue. When a new order appears, the worker thread is responsible for safely calling the broker's API to place the market exit order. This design decouples the real-time tick processing from the order placement logic, ensuring thread safety and robust execution.
+
 ### Future Enhancements:
 - **Order Book Integration:** The current implementation uses the Last Traded Price (LTP) for the trailing stop-loss logic. A future enhancement could be to use order book data (bid/ask prices and depth) to make more sophisticated stop-loss decisions. This would be particularly useful for options and futures trading.
-- **Thread-Safe Order Placement:** The current implementation logs a message when a stop-loss is triggered instead of placing an order, because the WebSocket thread does not have safe access to the broker API instance. A future enhancement would be to implement a thread-safe queue to communicate from the WebSocket thread back to the main application thread, which would then place the exit order. This would complete the automation of the trailing stop-loss.
 - **More Granular Subscriptions:** The application currently subscribes to the `ltp` (or `ltpc`) feed. For certain strategies, it might be beneficial to subscribe to the `full` feed, which includes market depth, and use that data in the stop-loss logic.
 
 ---
