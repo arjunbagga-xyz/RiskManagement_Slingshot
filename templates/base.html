@@ -18,13 +18,13 @@
     {% endwith %}
     <nav>
         <a href="{{ url_for('index') }}" class="nav-button">Home</a>
+        <a href="{{ url_for('settings') }}" class="nav-button">Settings</a>
         {% if is_logged_in %}
-            <a href="{{ url_for('settings') }}" class="nav-button">Settings</a>
             <a href="{{ url_for('logout') }}" class="nav-button logout">Logout</a>
-            <a href="{{ url_for('shutdown') }}" class="nav-button exit">Exit Application</a>
         {% else %}
             <a href="{{ url_for('login') }}" class="nav-button login">Login</a>
         {% endif %}
+        <a href="{{ url_for('shutdown') }}" class="nav-button exit">Exit Application</a>
     </nav>
     <div class="container">
         {% block content %}{% endblock %}
