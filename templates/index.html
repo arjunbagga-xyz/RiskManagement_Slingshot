@@ -37,8 +37,6 @@
         <select id="order_type" name="order_type">
             <option value="MARKET">Market</option>
             <option value="LIMIT">Limit</option>
-            <option value="SL">Stoploss (SL)</option>
-            <option value="SL-M">Stoploss-Market (SL-M)</option>
         </select><br>
 
         <label for="price">Price (for LIMIT and SL orders):</label><br>
@@ -53,7 +51,10 @@
 
 <div class="glass-panel">
     <h2>Placed Orders</h2>
-    <a href="/update_instruments"><button class="update-button">Update Instruments</button></a>
+    <a href="/update_instruments" class="update-button">Update Instruments</a>
+    {% if is_logged_in %}
+        <a href="/relogin" class="update-button">Refresh Session</a>
+    {% endif %}
     <table border="1">
         <thead>
             <tr>
@@ -144,22 +145,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const priceInput = document.getElementById('price');
 
     function updateForm() {
-        // Rule 1: Product vs Order Type
-        if (productSelect.value === 'CNC') {
-            // Disable SL and SL-M for CNC
-            orderTypeSelect.querySelector('option[value="SL"]').disabled = true;
-            orderTypeSelect.querySelector('option[value="SL-M"]').disabled = true;
-            // If a disabled option was selected, switch to MARKET
-            if (orderTypeSelect.value === 'SL' || orderTypeSelect.value === 'SL-M') {
-                orderTypeSelect.value = 'MARKET';
-            }
-        } else {
-            // Enable all for other products
-            orderTypeSelect.querySelector('option[value="SL"]').disabled = false;
-            orderTypeSelect.querySelector('option[value="SL-M"]').disabled = false;
-        }
-
-        // Rule 2: Order Type vs Price Field
+        // Rule: Order Type vs Price Field
         if (orderTypeSelect.value === 'MARKET') {
             priceInput.disabled = true;
             priceInput.value = ''; // Clear the value

@@ -282,6 +282,17 @@ def logout():
     flash("You have been logged out.", "success")
     return redirect('/')
 
+@app.route('/relogin')
+def relogin():
+    broker = session.get('logged_in_broker')
+    if broker == 'Zerodha':
+        return redirect('/login/zerodha')
+    elif broker == 'Upstox':
+        return redirect('/login/upstox')
+    else:
+        flash("You are not logged in.", "error")
+        return redirect('/login')
+
 @app.route('/api/symbols')
 def api_symbols():
     broker = session.get('logged_in_broker')

@@ -3,8 +3,12 @@
 {% block title %}Login{% endblock %}
 
 {% block content %}
-    <h1>Login</h1>
-    <p>Please select your broker to login:</p>
-    <a href="{{ url_for('login_zerodha') }}"><button>Login with Zerodha</button></a>
-    <a href="{{ url_for('login_upstox') }}"><button>Login with Upstox</button></a>
+    <div class="glass-panel">
+        <h1>Login</h1>
+        <p>Please select your broker to login:</p>
+        <div class="login-buttons">
+            <a href="{{ url_for('login_zerodha') }}" class="login-button zerodha">Login with Zerodha</a>
+            <a href="{{ url_for('login_upstox') }}" class="login-button upstox">Login with Upstox</a>
+        </div>
+    </div>
 {% endblock %}
