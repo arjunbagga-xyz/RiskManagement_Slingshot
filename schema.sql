@@ -6,15 +6,14 @@ CREATE TABLE orders (
     quantity INTEGER NOT NULL,
     price REAL NOT NULL,
     initial_stoploss REAL NOT NULL,
-    current_stoploss REAL NOT NULL,
-    current_stoploss_price REAL,
+    current_stoploss_price REAL NOT NULL,
     potential_profit REAL,
     status TEXT NOT NULL,
     transaction_type TEXT,
     exchange TEXT,
     product TEXT,
-        broker TEXT NOT NULL,
-        instrument_key TEXT
+    broker TEXT NOT NULL,
+    instrument_key TEXT
 );
 
 DROP TABLE IF EXISTS instruments;

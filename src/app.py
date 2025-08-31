@@ -43,14 +43,18 @@ kite = KiteConnect(api_key=ZERODHA_API_KEY)
 order_queue = queue.Queue()
 
 def order_placement_worker():
+    """This worker runs in a background thread to place orders from the queue."""
     while True:
         order_details = order_queue.get()
-        if order_details is None:
+        if order_details is None: # A way to stop the worker
             break
 
         broker = order_details['broker']
+        logging.info(f"Worker picked up a {broker} order for {order_details['symbol']}.")
 
         try:
+            # Use app_context to be able to access session and other context-bound objects
+            # if needed in the future, though not strictly necessary for this implementation.
             with app.app_context():
                 if broker == 'Zerodha':
                     access_token = ACCESS_TOKENS.get('zerodha')
@@ -87,9 +91,9 @@ def order_placement_worker():
                         )
                     )
 
-                logging.info(f"Stop-loss order placed for {order_details['symbol']}.")
+                logging.info(f"Stop-loss order placed successfully for {order_details['symbol']}.")
 
-                # Update the order status in the database
+                # Update the order status in the database to prevent re-triggering
                 conn = get_db_connection()
                 conn.execute('UPDATE orders SET status = ? WHERE id = ?', ('CLOSED', order_details['order_id']))
                 conn.commit()
@@ -100,6 +104,7 @@ def order_placement_worker():
         finally:
             order_queue.task_done()
 
+# --- Routes ---
 
 @app.route('/login/zerodha')
 def login_zerodha():
@@ -288,7 +293,9 @@ def api_symbols():
     conn.close()
     return jsonify([s['trading_symbol'] for s in symbols])
 
+# Start the background worker thread for order placement
+order_worker_thread = threading.Thread(target=order_placement_worker, daemon=True)
+order_worker_thread.start()
+
 if __name__ == '__main__':
-    order_worker_thread = threading.Thread(target=order_placement_worker, daemon=True)
-    order_worker_thread.start()
     app.run(debug=True, port=5000)

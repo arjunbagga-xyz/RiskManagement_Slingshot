@@ -1,8 +1,14 @@
 import threading
 import time
 import logging
+import json
+from kiteconnect import KiteTicker
+import upstox_client
+from upstox_client.rest import ApiException
+import websocket
 
 class WebSocketManager(threading.Thread):
+    """Base class for WebSocket managers for different brokers."""
     def __init__(self, broker, access_token, order_queue, api_key=None):
         super().__init__()
         self.broker = broker
@@ -11,14 +17,14 @@ class WebSocketManager(threading.Thread):
         self.order_queue = order_queue
         self.ws = None
         self.running = False
+        self.subscribed_instruments = set()
 
     def run(self):
         self.running = True
-        # Main loop to connect and reconnect
         while self.running:
             self.connect()
-            # Keep the thread alive while connected
-            while self.ws and self.ws.is_connected():
+            # Keep the thread alive while connected, or until stop is called
+            while self.ws and getattr(self.ws, 'is_connected', lambda: False)() and self.running:
                 time.sleep(1)
             if self.running:
                 logging.info(f"{self.broker} WebSocket disconnected. Reconnecting in 5 seconds...")
@@ -27,30 +33,35 @@ class WebSocketManager(threading.Thread):
     def connect(self):
         raise NotImplementedError("Subclasses must implement the connect method.")
 
-    def subscribe(self, instrument_tokens):
-        raise NotImplementedError("Subclasses must implement the subscribe method.")
+    def subscribe(self, instrument_keys):
+        self.subscribed_instruments.update(instrument_keys)
+        self._resubscribe()
 
-    def unsubscribe(self, instrument_tokens):
-        raise NotImplementedError("Subclasses must implement the unsubscribe method.")
+    def unsubscribe(self, instrument_keys):
+        self.subscribed_instruments.difference_update(instrument_keys)
+        self._resubscribe()
 
-    def on_tick(self, tick_data):
-        if self.broker == 'Zerodha':
-            for tick in tick_data:
-                self.process_tick(tick.get('instrument_token'), tick.get('last_price'))
-        elif self.broker == 'Upstox':
-            feeds = tick_data.get('feeds', {})
-            for instrument_key, feed in feeds.items():
-                ltp = feed.get('ltpc', {}).get('ltp')
-                self.process_tick(instrument_key, ltp)
+    def _resubscribe(self):
+        raise NotImplementedError("Subclasses must implement the resubscribe method.")
+
+    def on_tick(self, ticks):
+        """This method is called when a new tick is received."""
+        # This logic is now broker-specific
+        raise NotImplementedError("Subclasses must implement the on_tick method.")
 
     def process_tick(self, instrument_token, ltp):
+        """Shared logic to process a tick for any broker."""
         from db import get_db_connection
 
         if not instrument_token or not ltp:
             return
 
         conn = get_db_connection()
-        order = conn.execute('SELECT * FROM orders WHERE status = "OPEN" AND instrument_key = ?', (str(instrument_token),)).fetchone()
+        # Find the order associated with this instrument tick
+        order = conn.execute(
+            'SELECT * FROM orders WHERE status = "OPEN" AND instrument_key = ?',
+            (str(instrument_token),)
+        ).fetchone()
 
         if not order:
             conn.close()
@@ -59,14 +70,16 @@ class WebSocketManager(threading.Thread):
         try:
             initial_price = float(order['price'])
             stoploss_percent = float(order['initial_stoploss'])
-            current_stoploss_price = float(order['current_stoploss_price'] or initial_price * (1 - stoploss_percent / 100))
+            current_stoploss_price = float(order['current_stoploss_price'])
 
+            # --- Stop-Loss Trigger Logic ---
             if ltp <= current_stoploss_price:
-                logging.info(f"--- STOP-LOSS TRIGGERED for order {order['order_id']} ---")
+                logging.info(f"--- STOP-LOSS TRIGGERED for order {order['order_id']} at price {ltp} (SL: {current_stoploss_price}) ---")
 
                 exit_transaction_type = 'SELL' if order['transaction_type'] == 'BUY' else 'BUY'
+
                 order_details = {
-                    'order_id': order['id'],
+                    'order_id': order['id'], # This is the DB id, not the broker order_id
                     'broker': order['broker'],
                     'exchange': order['exchange'],
                     'symbol': order['symbol'],
@@ -75,23 +88,26 @@ class WebSocketManager(threading.Thread):
                     'product': order['product'],
                     'instrument_key': order['instrument_key']
                 }
+
+                # Put the exit order on the queue for the worker to process
                 self.order_queue.put(order_details)
 
-                # The worker thread will now handle the status update
-                # conn.execute('UPDATE orders SET status = ? WHERE id = ?', ('CLOSED', order['id']))
-                # conn.commit()
+                # Update the status in the DB immediately to prevent re-triggering
+                conn.execute('UPDATE orders SET status = ? WHERE id = ?', ('TRIGGERED', order['id']))
+                conn.commit()
+
+            # --- Trailing Stop-Loss Logic ---
             else:
-                # Update trailing stop-loss
                 new_stoploss_price = ltp * (1 - stoploss_percent / 100)
                 if new_stoploss_price > current_stoploss_price:
-                    current_stoploss_price = new_stoploss_price
+                    profit = ((ltp - initial_price) / initial_price) * 100 if initial_price > 0 else 0
+                    conn.execute(
+                        'UPDATE orders SET current_stoploss_price = ?, potential_profit = ? WHERE id = ?',
+                        (new_stoploss_price, profit, order['id'])
+                    )
+                    conn.commit()
+                    logging.info(f"Trailing stop-loss for {order['symbol']} updated to {new_stoploss_price:.2f}")
 
-                profit = ((ltp - initial_price) / initial_price) * 100
-                conn.execute(
-                    'UPDATE orders SET price = ?, current_stoploss_price = ?, potential_profit = ? WHERE id = ?',
-                    (ltp, current_stoploss_price, profit, order['id'])
-                )
-                conn.commit()
         except Exception as e:
             logging.error(f"Error processing tick for order {order['order_id']}: {e}")
         finally:
@@ -102,125 +118,78 @@ class WebSocketManager(threading.Thread):
         if self.ws:
             self.ws.close()
 
-from kiteconnect import KiteTicker
-
 class ZerodhaWebSocketManager(WebSocketManager):
-    def __init__(self, access_token, api_key, order_queue):
-        super().__init__('Zerodha', access_token, order_queue, api_key)
-        self.subscribed_tokens = set()
-
     def connect(self):
         logging.info("Connecting to Zerodha WebSocket...")
         self.ws = KiteTicker(self.api_key, self.access_token)
         self.ws.on_ticks = self.on_tick
-        self.ws.on_connect = self.on_connect
-        self.ws.on_close = self.on_close
+        self.ws.on_connect = self._on_connect
+        self.ws.on_close = lambda ws, code, reason: logging.info(f"Zerodha WebSocket closed: {code} - {reason}")
         self.ws.connect(threaded=True)
 
-    def on_connect(self, ws, response):
+    def _on_connect(self, ws, response):
         logging.info("Zerodha WebSocket connected.")
-        if self.subscribed_tokens:
-            self.subscribe(list(self.subscribed_tokens))
+        self._resubscribe()
 
-    def on_close(self, ws, code, reason):
-        logging.info(f"Zerodha WebSocket closed: {code} - {reason}")
+    def on_tick(self, ticks):
+        for tick in ticks:
+            self.process_tick(tick.get('instrument_token'), tick.get('last_price'))
 
-    def subscribe(self, instrument_tokens):
-        logging.info(f"Subscribing to Zerodha instruments: {instrument_tokens}")
-        # Convert tokens to integers for the library
-        int_tokens = [int(t) for t in instrument_tokens]
-        self.subscribed_tokens.update(int_tokens)
-        if self.ws and self.ws.is_connected():
+    def _resubscribe(self):
+        if self.subscribed_instruments and self.ws and self.ws.is_connected():
+            int_tokens = [int(t) for t in self.subscribed_instruments]
+            logging.info(f"Subscribing to Zerodha instruments: {int_tokens}")
             self.ws.subscribe(int_tokens)
             self.ws.set_mode(self.ws.MODE_LTP, int_tokens)
 
-    def unsubscribe(self, instrument_tokens):
-        logging.info(f"Unsubscribing from Zerodha instruments: {instrument_tokens}")
-        self.subscribed_tokens.difference_update(instrument_tokens)
-        if self.ws and self.ws.is_connected():
-            self.ws.unsubscribe(instrument_tokens)
-
-import upstox_client
-from upstox_client.rest import ApiException
-import websocket
-import json
-
 class UpstoxWebSocketManager(WebSocketManager):
-    def __init__(self, access_token, order_queue):
-        super().__init__('Upstox', access_token, order_queue)
-        self.api_client = upstox_client.ApiClient()
-        self.api_client.set_access_token(self.access_token)
-        self.subscribed_instruments = set()
-
-    def get_market_data_feed_authorize(self):
-        api_instance = upstox_client.WebsocketApi(self.api_client)
+    def _get_ws_url(self):
+        api_instance = upstox_client.WebsocketApi(upstox_client.ApiClient(access_token=self.access_token))
         api_response = api_instance.get_market_data_feed_authorize(api_version="v2")
         return api_response.data.authorized_redirect_uri
 
     def connect(self):
         logging.info("Connecting to Upstox WebSocket...")
         try:
-            ws_url = self.get_market_data_feed_authorize()
+            ws_url = self._get_ws_url()
             self.ws = websocket.WebSocketApp(ws_url,
                                              on_message=self.on_message,
-                                             on_error=self.on_error,
-                                             on_close=self.on_close,
-                                             on_open=self.on_open)
+                                             on_error=lambda ws, err: logging.error(f"Upstox WebSocket error: {err}"),
+                                             on_close=lambda ws, code, msg: logging.info(f"Upstox WebSocket closed: {code} - {msg}"),
+                                             on_open=self._on_open)
             self.ws.run_forever()
         except ApiException as e:
             logging.error(f"Error getting Upstox WebSocket URL: {e}")
 
-    def on_open(self, ws):
+    def _on_open(self, ws):
         logging.info("Upstox WebSocket connected.")
-        if self.subscribed_instruments:
-            self.subscribe(list(self.subscribed_instruments))
+        self._resubscribe()
 
     def on_message(self, ws, message):
-        decoded_data = self.decode_message(message)
-        self.on_tick(decoded_data)
-
-    def on_error(self, ws, error):
-        logging.error(f"Upstox WebSocket error: {error}")
-
-    def on_close(self, ws, close_status_code, close_msg):
-        logging.info(f"Upstox WebSocket closed: {close_status_code} - {close_msg}")
-
-    def subscribe(self, instrument_keys):
-        logging.info(f"Subscribing to Upstox instruments: {instrument_keys}")
-        self.subscribed_instruments.update(instrument_keys)
-        if self.ws and self.ws.sock and self.ws.sock.connected:
-            request = {
-                "guid": "some-guid",
-                "method": "sub",
-                "data": {
-                    "mode": "ltpc",
-                    "instrumentKeys": instrument_keys
-                }
-            }
-            self.ws.send(json.dumps(request))
-
-    def unsubscribe(self, instrument_keys):
-        logging.info(f"Unsubscribing from Upstox instruments: {instrument_keys}")
-        self.subscribed_instruments.difference_update(instrument_keys)
-        if self.ws and self.ws.sock and self.ws.sock.connected:
-            request = {
-                "guid": "some-guid",
-                "method": "unsub",
-                "data": {
-                    "instrumentKeys": instrument_keys
-                }
-            }
-            self.ws.send(json.dumps(request))
-
-    def decode_message(self, message):
-        # Upstox sends protobuf messages, so they need to be decoded
         try:
             from upstox_client.feeder.proto.MarketDataFeed_pb2 import FeedResponse
             from google.protobuf.json_format import MessageToDict
 
             feed = FeedResponse()
             feed.ParseFromString(message)
-            return MessageToDict(feed)
+            data = MessageToDict(feed)
+
+            feeds = data.get('feeds', {})
+            for instrument_key, feed_data in feeds.items():
+                ltp = feed_data.get('ltpc', {}).get('ltp')
+                self.process_tick(instrument_key, ltp)
+
         except ImportError:
-            logging.error("Could not import FeedResponse from upstox_client.feeder.proto. Please ensure the upstox-python-sdk is installed correctly.")
-            return {}
+            logging.error("Could not import FeedResponse from upstox_client.feeder.proto.")
+        except Exception as e:
+            logging.error(f"Error decoding Upstox message: {e}")
+
+    def _resubscribe(self):
+        if self.subscribed_instruments and self.ws and self.ws.sock and self.ws.sock.connected:
+            request = {
+                "guid": "some-guid",
+                "method": "sub",
+                "data": { "mode": "ltpc", "instrumentKeys": list(self.subscribed_instruments) }
+            }
+            self.ws.send(json.dumps(request))
+            logging.info(f"Subscribing to Upstox instruments: {list(self.subscribed_instruments)}")
