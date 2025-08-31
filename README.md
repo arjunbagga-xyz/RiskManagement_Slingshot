@@ -1,13 +1,16 @@
 # Trading Tool with Trailing Stop-Loss
 
-This is a web-based trading tool that allows you to connect to Zerodha and Upstox, place orders, and manage risk with a trailing stop-loss mechanism.
+This is a web-based trading tool that allows you to connect to Zerodha and Upstox, place orders, and manage risk with a trailing stop-loss mechanism. The application features a modern, glassmorphism-themed UI for a better user experience.
 
 ## Features
 
+- **Modern UI:** A sleek and modern user interface with a glassmorphism theme.
+- **Searchable Symbol List:** Quickly find and select trading symbols with a searchable, autocomplete input field.
+- **Dynamic Order Form:** The order form intelligently enables or disables options based on your selections to prevent invalid order combinations.
 - **Broker Integration:** Login with your Zerodha or Upstox account.
 - **Order Placement:** Place different types of orders (Market, Limit, SL, SL-M).
 - **Trailing Stop-Loss:** Automatically manage your risk with a trailing stop-loss that adjusts as the price moves in your favor.
-- **Order Tracking:** View your placed orders and their current status in a clean table.
+- **Order Tracking:** View your placed orders and their current status in a clean, themed table.
 - **Web-based UI:** A simple and intuitive user interface built with Flask.
 
 ## Setup and Installation
@@ -87,4 +90,4 @@ The application logs important events and errors to `app.log`. Check this file f
 
 ## Token Refresh
 
-Please refer to the `TOKEN_REFRESH.md` file for a detailed explanation of the token refresh mechanisms for Zerodha and Upstox.
+Please refer to the `TOKEN_REFRESH.md` file for a detailed explanation of the token refresh mechanisms and a discussion on stop-loss strategies.
