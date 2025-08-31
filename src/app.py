@@ -6,12 +6,16 @@ import time
 import threading
 import logging
 import queue
-from db import get_db_connection, update_instrument_list
+from db import get_db_connection, update_instrument_list, init_db
 from websocket_manager import ZerodhaWebSocketManager, UpstoxWebSocketManager
 from security import encrypt_value, decrypt_value
 
 app = Flask(__name__, template_folder='../templates', static_folder='../static')
 app.secret_key = os.urandom(24)
+
+# --- Initialize DB ---
+with app.app_context():
+    init_db()
 
 # --- Logging ---
 logging.basicConfig(filename='app.log', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -152,7 +156,13 @@ def order_placement_worker():
         finally:
             order_queue.task_done()
 
-# --- Routes ---
+# --- Routes -- -
+
+@app.route('/init-db')
+def init_db_route():
+    init_db()
+    flash('Database initialized successfully!', 'success')
+    return redirect('/')
 
 @app.route('/login/zerodha')
 def login_zerodha():

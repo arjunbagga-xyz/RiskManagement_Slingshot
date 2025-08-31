@@ -13,8 +13,19 @@ def get_db_connection():
 
 def init_db():
     conn = get_db_connection()
-    with open('schema.sql', 'r') as f:
-        conn.executescript(f.read())
+    # Check if tables already exist
+    cursor = conn.cursor()
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='orders'")
+    orders_table_exists = cursor.fetchone()
+    
+    if not orders_table_exists:
+        print("Initializing database...")
+        with open('schema.sql', 'r') as f:
+            conn.executescript(f.read())
+        print("Database initialized.")
+    else:
+        print("Database already initialized.")
+        
     conn.close()
 
 def update_upstox_instruments():
