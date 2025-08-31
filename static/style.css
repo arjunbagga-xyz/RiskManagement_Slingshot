@@ -84,6 +84,20 @@ form input, form select {
     box-sizing: border-box;
 }
 
+.form-grid {
+    display: flex;
+    gap: 20px;
+}
+
+.form-column {
+    flex: 1;
+}
+
+.submit-container {
+    text-align: center;
+    margin-top: 20px;
+}
+
 form input[type="submit"], .update-button {
     width: auto;
     background: linear-gradient(45deg, #00f0ff, #0077ff);

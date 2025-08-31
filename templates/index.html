@@ -6,55 +6,58 @@
 <div class="glass-panel">
     <h1>Place an Order</h1>
     <form action="/place_order" method="post" id="order-form">
-        <div class="autocomplete-container">
-            <label for="symbol">Symbol:</label><br>
-            <input type="text" id="symbol" name="symbol" autocomplete="off"><br>
+        <div class="form-grid">
+            <div class="form-column">
+                <div class="autocomplete-container">
+                    <label for="symbol">Symbol:</label><br>
+                    <input type="text" id="symbol" name="symbol" autocomplete="off"><br>
+                </div>
+
+                <label for="quantity">Quantity:</label><br>
+                <input type="number" id="quantity" name="quantity" value="1"><br>
+
+                <label for="transaction_type">Transaction Type:</label><br>
+                <select id="transaction_type" name="transaction_type">
+                    <option value="BUY">BUY</option>
+                    <option value="SELL">SELL</option>
+                </select><br>
+
+                <label for="product">Product:</label><br>
+                <select id="product" name="product">
+                    <option value="MIS">MIS (Intraday)</option>
+                    <option value="CNC">CNC (Delivery)</option>
+                    <option value="NRML">NRML (Normal F&O)</option>
+                </select><br>
+            </div>
+            <div class="form-column">
+                <label for="exchange">Exchange:</label><br>
+                <select id="exchange" name="exchange">
+                    <option value="NSE">NSE</option>
+                    <option value="BSE">BSE</option>
+                </select><br>
+
+                <label for="order_type">Order Type:</label><br>
+                <select id="order_type" name="order_type">
+                    <option value="MARKET">Market</option>
+                    <option value="LIMIT">Limit</option>
+                </select><br>
+
+                <label for="price">Price (for LIMIT orders):</label><br>
+                <input type="number" step="0.01" id="price" name="price"><br>
+
+                <label for="stoploss">Trailing Stoploss (%):</label><br>
+                <input type="number" step="0.01" id="stoploss" name="stoploss"><br>
+            </div>
         </div>
-
-        <label for="quantity">Quantity:</label><br>
-        <input type="number" id="quantity" name="quantity" value="1"><br>
-
-        <label for="transaction_type">Transaction Type:</label><br>
-        <select id="transaction_type" name="transaction_type">
-            <option value="BUY">BUY</option>
-            <option value="SELL">SELL</option>
-        </select><br>
-
-        <label for="product">Product:</label><br>
-        <select id="product" name="product">
-            <option value="MIS">MIS (Intraday)</option>
-            <option value="CNC">CNC (Delivery)</option>
-            <option value="NRML">NRML (Normal F&O)</option>
-        </select><br>
-
-        <label for="exchange">Exchange:</label><br>
-        <select id="exchange" name="exchange">
-            <option value="NSE">NSE</option>
-            <option value="BSE">BSE</option>
-        </select><br>
-
-        <label for="order_type">Order Type:</label><br>
-        <select id="order_type" name="order_type">
-            <option value="MARKET">Market</option>
-            <option value="LIMIT">Limit</option>
-        </select><br>
-
-        <label for="price">Price (for LIMIT and SL orders):</label><br>
-        <input type="number" step="0.01" id="price" name="price"><br>
-
-        <label for="stoploss">Trailing Stoploss (%):</label><br>
-        <input type="number" step="0.01" id="stoploss" name="stoploss"><br>
-
-        <input type="submit" value="Place Order">
+        <div class="submit-container">
+            <input type="submit" value="Place Order">
+        </div>
     </form>
 </div>
 
 <div class="glass-panel">
     <h2>Placed Orders</h2>
     <a href="/update_instruments" class="update-button">Update Instruments</a>
-    {% if is_logged_in %}
-        <a href="/relogin" class="update-button">Refresh Session</a>
-    {% endif %}
     <table border="1">
         <thead>
             <tr>
@@ -145,7 +148,23 @@ document.addEventListener('DOMContentLoaded', function() {
     const priceInput = document.getElementById('price');
 
     function updateForm() {
-        // Rule: Order Type vs Price Field
+        const selectedExchange = document.getElementById('exchange').value;
+        const selectedProduct = productSelect.value;
+
+        // --- Rule 1: Exchange vs. Product ---
+        // Example: If BSE is selected, maybe NRML is not available.
+        // This is a placeholder for future logic as current products are general.
+        const nrmlOption = productSelect.querySelector('option[value="NRML"]');
+        if (selectedExchange === 'BSE') {
+            // nrmlOption.style.display = 'none';
+            // if (selectedProduct === 'NRML') {
+            //     productSelect.value = 'MIS'; // Change to a default
+            // }
+        } else {
+            // nrmlOption.style.display = 'block';
+        }
+
+        // --- Rule 2: Order Type vs. Price Field ---
         if (orderTypeSelect.value === 'MARKET') {
             priceInput.disabled = true;
             priceInput.value = ''; // Clear the value

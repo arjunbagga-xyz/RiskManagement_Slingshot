@@ -90,4 +90,4 @@ The application logs important events and errors to `app.log`. Check this file f
 
 ## Token Refresh
 
-Please refer to the `TOKEN_REFRESH.md` file for a detailed explanation of the token refresh mechanisms and a discussion on stop-loss strategies.
+A manual login is required each day to generate a new access token for both Zerodha and Upstox. For more detailed discussions on application features and architecture, please see the `BRAINSTORM.md` file.
