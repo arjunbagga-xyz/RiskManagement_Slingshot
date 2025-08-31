@@ -9,6 +9,7 @@ This is a web-based trading tool that allows you to connect to Zerodha and Upsto
 - **Searchable Symbol List:** Quickly find and select trading symbols with a searchable, autocomplete input field that is populated with broker-specific instruments.
 - **Dynamic Order Form:** The order form intelligently enables or disables options based on your selections to prevent invalid order combinations.
 - **Broker Integration:** Login with your Zerodha or Upstox account.
+- **Secure Login:** The application now requires users to log in before accessing the main features, ensuring that trading activities are secure and private.
 - **Order Placement:** Place Market and Limit orders.
 - **Order Tracking:** View your placed orders and their current status in a clean, themed table.
 
@@ -37,7 +38,12 @@ The application uses a multi-threaded architecture to handle real-time data proc
 
 ## Configuration
 
-After running the application for the first time, navigate to the **Settings** page. Here, you can enter and save your API keys from the developer portals of Zerodha and Upstox. The application will store them securely in its local database.
+Before you can log in, you must configure your broker's API credentials.
+
+1.  Run the application for the first time. You will be directed to the login page.
+2.  From the login page, you can navigate to the **Settings** page (or will be redirected if no settings are found).
+3.  On the Settings page, enter your API keys from the developer portals of Zerodha and Upstox.
+4.  The application will store these credentials securely in its local database.
 
 You will need to provide:
 - Zerodha API Key & API Secret
@@ -47,13 +53,13 @@ The application will need to be restarted after saving the settings for the chan
 
 ## How to Run the Application
 
-Once you have installed the dependencies, you can run the application with the following command:
+Once you have installed the dependencies and configured your settings, you can run the application:
 
 ```bash
 python src/app.py
 ```
 
-The application will be available at `http://localhost:5000`.
+The application will be available at `http://localhost:5000`. Upon visiting this URL, you will be prompted to log in with your chosen broker.
 
 ### Logging
 

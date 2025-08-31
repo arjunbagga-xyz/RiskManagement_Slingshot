@@ -13,13 +13,16 @@ participant Browser
 participant "Flask App" as App
 participant "Broker API" as Broker
 
-User -> Browser: Accesses the application
+User -> Browser: Accesses the application (GET /)
 Browser -> App: GET /
-App --> Browser: Renders index.html
-
-User -> Browser: Clicks "Login"
-Browser -> App: GET /login
-App --> Browser: Renders login.html with broker options
+App -> App: Check if user is logged in
+alt User is not logged in
+    App --> Browser: Redirect to /login
+    Browser -> App: GET /login
+    App --> Browser: Renders login.html
+else User is logged in
+    App --> Browser: Renders index.html
+end
 
 User -> Browser: Clicks "Login with Zerodha"
 Browser -> App: GET /login/zerodha
@@ -50,21 +53,26 @@ This diagram illustrates the logic of the trailing stop-loss mechanism.
 ```plantuml
 @startuml
 start
-:User clicks "Refresh Prices";
-:For each OPEN order;
-    :Fetch Last Traded Price (LTP) from Broker API;
-    if (LTP <= Current Stop-Loss Price?) then (yes)
-        :Trigger SELL order (exit position);
-        :Update order status to "CLOSED";
-        :end;
-    else (no)
-        if (LTP > Highest Price since order placed?) then (yes)
-            :Update Highest Price;
-            :Calculate new Trailing Stop-Loss Price;
-            :Update order with new stop-loss;
-        endif
+:User places an order;
+:Application subscribes to WebSocket price feed for the instrument;
+note right
+  This runs in a background thread
+end note
+
+repeat
+  :WebSocket sends a new price tick (LTP);
+  :Application receives the tick;
+  if (LTP <= Current Stop-Loss Price?) then (yes)
+    :Place exit order in a thread-safe queue;
+    :Update order status to "CLOSED";
+    break
+  else (no)
+    :Calculate potential new stop-loss price;
+    if (potential new price > current stop-loss price) then (yes)
+      :Update the order with the new stop-loss price;
     endif
-:Redirect to homepage with updated order info;
+  endif
+repeat while (position is open)
 stop
 @enduml
 ```

@@ -6,6 +6,7 @@ import time
 import threading
 import logging
 import queue
+from functools import wraps
 from db import get_db_connection, update_instrument_list, init_db
 from websocket_manager import ZerodhaWebSocketManager, UpstoxWebSocketManager
 from security import encrypt_value, decrypt_value
@@ -156,6 +157,23 @@ def order_placement_worker():
         finally:
             order_queue.task_done()
 
+# --- Decorators ---
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if session.get('logged_in_broker') is None:
+            return redirect('/login')
+        return f(*args, **kwargs)
+    return decorated_function
+
+def login_required_api(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if session.get('logged_in_broker') is None:
+            return jsonify({"error": "Authentication required"}), 401
+        return f(*args, **kwargs)
+    return decorated_function
+
 # --- Routes -- -
 
 @app.route('/init-db')
@@ -274,6 +292,7 @@ def login():
     return render_template('login.html')
 
 @app.route('/')
+@login_required
 def index():
     is_logged_in = session.get('logged_in_broker') is not None
     conn = get_db_connection()
@@ -282,13 +301,10 @@ def index():
     return render_template('index.html', is_logged_in=is_logged_in, orders=orders)
 
 @app.route('/place_order', methods=['POST'])
+@login_required
 def place_order():
     conn = get_db_connection()
     broker = session.get('logged_in_broker')
-    if not broker:
-        flash("You are not logged in.", "error")
-        conn.close()
-        return redirect('/login')
 
     try:
         if broker == 'Zerodha':
@@ -354,11 +370,9 @@ def place_order():
     return redirect('/')
 
 @app.route('/update_instruments')
+@login_required
 def update_instruments_route():
     broker = session.get('logged_in_broker')
-    if not broker:
-        flash("Please login first.", "error")
-        return redirect('/login')
 
     kite_instance = None
     if broker == 'Zerodha':
@@ -400,10 +414,9 @@ def settings():
     return render_template('settings.html', is_logged_in=is_logged_in, settings=current_settings)
 
 @app.route('/api/symbols')
+@login_required_api
 def api_symbols():
     broker = session.get('logged_in_broker')
-    if not broker:
-        return jsonify([])
 
     conn = get_db_connection()
     symbols = conn.execute('SELECT trading_symbol FROM instruments WHERE broker = ?', (broker,)).fetchall()
