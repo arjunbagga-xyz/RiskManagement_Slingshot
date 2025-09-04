@@ -216,54 +216,56 @@ class ZerodhaWebSocketManager(WebSocketManager):
             self.ws.set_mode(self.ws.MODE_FULL, int_tokens)
 
 class UpstoxWebSocketManager(WebSocketManager):
-    def _get_ws_url(self):
-        api_instance = upstox_client.WebsocketApi(upstox_client.ApiClient(access_token=self.access_token))
-        api_response = api_instance.get_market_data_feed_authorize(api_version="v2")
-        return api_response.data.authorized_redirect_uri
-
     def connect(self):
-        logging.info("Connecting to Upstox WebSocket...")
+        logging.info("Connecting to Upstox WebSocket using MarketDataStreamer...")
         try:
-            ws_url = self._get_ws_url()
-            self.ws = websocket.WebSocketApp(ws_url,
-                                             on_message=self.on_message,
-                                             on_error=lambda ws, err: logging.error(f"Upstox WebSocket error: {err}"),
-                                             on_close=lambda ws, code, msg: logging.info(f"Upstox WebSocket closed: {code} - {msg}"),
-                                             on_open=self._on_open)
-            self.ws.run_forever()
-        except ApiException as e:
-            logging.error(f"Error getting Upstox WebSocket URL: {e}")
+            # The MarketDataStreamer handles the authorization and connection internally.
+            # It uses the api_client from the broker_api object, which is already
+            # configured with the access token.
+            self.ws = upstox_client.MarketDataStreamer(
+                api_client=self.broker_api.api_client,
+                instrument_keys=list(self.subscribed_instruments),
+                mode='full'
+            )
 
-    def _on_open(self, ws):
+            # Assign callbacks using the SDK's event handler system
+            self.ws.on("open", self._on_open)
+            self.ws.on("message", self.on_message)
+            self.ws.on("error", lambda err: logging.error(f"Upstox WebSocket error: {err}"))
+            self.ws.on("close", lambda code, msg: logging.info(f"Upstox WebSocket closed: {code} - {msg}"))
+
+            # This call is blocking and will run the event loop in the current thread
+            self.ws.connect()
+
+        except Exception as e:
+            logging.error(f"Error connecting to Upstox WebSocket: {e}")
+
+    def _on_open(self, *args):
         logging.info("Upstox WebSocket connected.")
         self.sync_order_status()
         self._resubscribe()
 
-    def on_message(self, ws, message):
+    def on_message(self, message):
+        # The MarketDataStreamer provides the data as a dictionary,
+        # so no need for protobuf parsing.
         try:
-            from upstox_client.feeder.proto.MarketDataFeed_pb2 import FeedResponse
-            from google.protobuf.json_format import MessageToDict
-
-            feed = FeedResponse()
-            feed.ParseFromString(message)
-            data = MessageToDict(feed)
-
-            feeds = data.get('feeds', {})
-            for instrument_key, feed_data in feeds.items():
-                # Pass the whole feed_data dictionary to process_tick
+            # The structure is message -> feeds -> instrument_key -> data
+            for instrument_key, feed_data in message.get('feeds', {}).items():
                 self.process_tick(instrument_key, feed_data)
-
-        except ImportError:
-            logging.error("Could not import FeedResponse from upstox_client.feeder.proto.")
         except Exception as e:
-            logging.error(f"Error decoding Upstox message: {e}")
+            logging.error(f"Error processing Upstox message: {e}")
 
     def _resubscribe(self):
-        if self.subscribed_instruments and self.ws and self.ws.sock and self.ws.sock.connected:
-            request = {
-                "guid": "some-guid",
-                "method": "sub",
-                "data": { "mode": "full", "instrumentKeys": list(self.subscribed_instruments) }
-            }
-            self.ws.send(json.dumps(request))
+        if not self.subscribed_instruments:
+            return
+
+        if self.ws:
             logging.info(f"Subscribing to Upstox instruments: {list(self.subscribed_instruments)}")
+            # The SDK's subscribe method takes the list of instruments and the mode
+            self.ws.subscribe(list(self.subscribed_instruments), "full")
+
+    # Override the base class stop method to use the SDK's disconnect
+    def stop(self):
+        self.running = False
+        if self.ws:
+            self.ws.disconnect()

@@ -132,16 +132,23 @@ def order_placement_worker():
                     configuration = upstox_client.Configuration()
                     configuration.access_token = access_token
                     api_instance = upstox_client.OrderApi(upstox_client.ApiClient(configuration))
+
+                    v3_request_body = upstox_client.PlaceOrderRequest(
+                        quantity=order_details['quantity'],
+                        product=get_upstox_product(order_details['product']),
+                        validity="DAY",
+                        instrument_token=order_details['instrument_key'],
+                        order_type='MARKET',
+                        transaction_type='s' if order_details['transaction_type'] == 'SELL' else 'b',
+                        price=0,
+                        disclosed_quantity=0,
+                        trigger_price=0,
+                        is_amo=False
+                    )
+
                     api_instance.place_order(
-                        api_version="v2",
-                        body=upstox_client.PlaceOrderRequest(
-                            quantity=order_details['quantity'],
-                            product=get_upstox_product(order_details['product']),
-                            validity="DAY",
-                            instrument_token=order_details['instrument_key'],
-                            order_type='MARKET',
-                            transaction_type='s' if order_details['transaction_type'] == 'SELL' else 'b'
-                        )
+                        api_version="v3",
+                        body=v3_request_body
                     )
 
                 logging.info(f"Stop-loss order placed successfully for {order_details['symbol']}.")
@@ -329,20 +336,31 @@ def place_order():
             configuration = upstox_client.Configuration()
             configuration.access_token = ACCESS_TOKENS['upstox']
             api_instance = upstox_client.OrderApi(upstox_client.ApiClient(configuration))
-            api_response = api_instance.place_order(
-                api_version="v2",
-                body=upstox_client.PlaceOrderRequest(
-                    quantity=int(request.form['quantity']),
-                    product=get_upstox_product(request.form['product']),
-                    validity="DAY",
-                    price=float(request.form['price']) if request.form['price'] else 0,
-                    instrument_token=instrument_token,
-                    order_type=request.form['order_type'],
-                    transaction_type='b' if request.form['transaction_type'] == 'BUY' else 's',
-                    disclosed_quantity=0, trigger_price=0, is_amo=False
-                )
+
+            # Construct the V3 request body
+            v3_request_body = upstox_client.PlaceOrderRequest(
+                quantity=int(request.form['quantity']),
+                product=get_upstox_product(request.form['product']),
+                validity="DAY",
+                price=float(request.form['price']) if request.form['price'] else 0,
+                instrument_token=instrument_token,
+                order_type=request.form['order_type'],
+                transaction_type='b' if request.form['transaction_type'] == 'BUY' else 's',
+                disclosed_quantity=0,
+                trigger_price=0,
+                is_amo=False
             )
-            order_id = api_response.data.order_id
+
+            # Call the v3 place_order endpoint
+            api_response = api_instance.place_order(
+                api_version="v3",
+                body=v3_request_body
+            )
+            # V3 returns a list of order IDs. For non-sliced orders, it will be a single element list.
+            # We'll safely take the first one.
+            order_id = api_response.data.order_ids[0] if api_response.data.order_ids else None
+            if not order_id:
+                raise Exception("Failed to place order with Upstox, no order ID returned.")
 
         instrument_key_to_store = instrument_token if broker == 'Upstox' else conn.execute('SELECT instrument_key FROM instruments WHERE trading_symbol = ? AND exchange = ? AND broker = ?', (request.form['symbol'].upper(), request.form['exchange'].upper(), broker)).fetchone()['instrument_key']
 
