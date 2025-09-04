@@ -45,6 +45,24 @@ The application has been migrated from a simple HTTP polling mechanism to a real
 
 ---
 
+## Note 3: Order Status Synchronization
+
+### The Problem:
+What happens if an order is filled, cancelled, or rejected by the broker while the application is not running? The local database would still show the order as "OPEN," leading to data inconsistency and potentially incorrect behavior when the application restarts.
+
+### The Solution:
+To solve this, the application implements an **order status synchronization** feature.
+
+- **Trigger:** This process is automatically triggered every time a WebSocket connection to the broker is successfully established.
+- **Mechanism:**
+    1. The `WebSocketManager` queries the local database for all orders marked with the "OPEN" status.
+    2. For each open order, it makes an API call to the broker to get the latest status of that specific order.
+    3. It then compares the broker's status with the local status.
+    4. If the broker reports the order as `COMPLETE`, `FILLED`, `CANCELLED`, or `REJECTED`, the application updates the order's status in the local database to match.
+- **Benefit:** This ensures that the application's state is always consistent with the broker's, providing a more robust and reliable system. It prevents the application from trying to manage a stop-loss for an order that no longer exists.
+
+---
+
 ## Note 4: Trailing Stop-Loss Execution Logic
 
 This section details the mathematics and logic used to implement the automated trailing stop-loss feature.
@@ -66,6 +84,13 @@ As the price of the asset changes, the system continuously recalculates a *poten
 - **Example:**
   - The stock price rises to **$110**.
   - The `new_stop_price` is recalculated as `110 * 0.95 = $104.50`.
+
+### 2a. Advanced Price Selection for Trailing
+The choice of `current_asset_price` in the formula above is critical. While the Last Traded Price (LTP) is the default, it may not always be the safest price to use for trailing, especially in volatile markets. The application uses a more sophisticated approach depending on the product type.
+
+- **Default (for CNC orders):** The system uses the **LTP**. This is suitable for long-term delivery-based trades where minor, momentary price fluctuations are less critical.
+- **Advanced (for MIS/NRML orders):** For intraday products, the system uses the **best bid price** from the market depth feed (when available) for buy-side orders.
+  - **Why?** The best bid represents the highest price a buyer is currently willing to pay for the asset. Trailing based on the bid price is more conservative and realistic than using the LTP, which could be an anomalous print. It ensures the stop-loss trails the actual demand for the stock, providing a safer cushion against volatility.
 
 ### 3. The Update Condition
 The stop-loss price is only ever updated if the new calculated price is *higher* than the existing one. The stop-loss never moves down.

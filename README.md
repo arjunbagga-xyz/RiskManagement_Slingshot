@@ -4,8 +4,10 @@ This is a web-based trading tool that allows you to connect to Zerodha and Upsto
 
 ## Features
 
-- **Real-Time Trailing Stop-Loss:** The application uses a persistent WebSocket connection to the broker's streaming API to monitor your open positions in real-time. The trailing stop-loss is updated with every price tick, providing a fast and efficient way to manage risk.
+- **Advanced Real-Time Trailing Stop-Loss:** The application uses a persistent WebSocket connection to monitor positions. The trailing stop-loss is updated with every price tick and uses advanced logic (LTP for long-term trades, best bid price for intraday) for maximum accuracy and safety.
+- **Order Status Synchronization:** Automatically syncs local order statuses with the broker upon connection, ensuring data consistency even if the application was offline.
 - **Modern UI:** A sleek and modern user interface with a dark, neon-accented theme.
+- **Potential Profit Tracking:** The UI displays the potential profit percentage that is "locked in" by the current stop-loss price, giving you a clear view of your risk management.
 - **Searchable Symbol List:** Quickly find and select trading symbols with a searchable, autocomplete input field that is populated with broker-specific instruments.
 - **Dynamic Order Form:** The order form intelligently enables or disables options based on your selections to prevent invalid order combinations.
 - **Broker Integration:** Login with your Zerodha or Upstox account.
