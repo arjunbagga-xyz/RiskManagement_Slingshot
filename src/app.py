@@ -7,9 +7,9 @@ import threading
 import logging
 import queue
 from functools import wraps
-from db import get_db_connection, update_instrument_list, init_db
-from websocket_manager import ZerodhaWebSocketManager, UpstoxWebSocketManager
-from security import encrypt_value, decrypt_value
+from .db import get_db_connection, update_instrument_list, init_db
+from .websocket_manager import ZerodhaWebSocketManager, UpstoxWebSocketManager
+from .security import encrypt_value, decrypt_value
 
 app = Flask(__name__, template_folder='../templates', static_folder='../static')
 app.secret_key = os.urandom(24)

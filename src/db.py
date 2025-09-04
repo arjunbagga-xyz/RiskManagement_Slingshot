@@ -11,6 +11,8 @@ def get_db_connection():
     conn.row_factory = sqlite3.Row
     return conn
 
+import os
+
 def init_db():
     conn = get_db_connection()
     # Check if tables already exist
@@ -20,7 +22,10 @@ def init_db():
     
     if not orders_table_exists:
         print("Initializing database...")
-        with open('schema.sql', 'r') as f:
+        # Construct an absolute path to the schema.sql file
+        script_dir = os.path.dirname(os.path.realpath(__file__))
+        schema_path = os.path.join(script_dir, '..', 'schema.sql')
+        with open(schema_path, 'r') as f:
             conn.executescript(f.read())
         print("Database initialized.")
     else:
