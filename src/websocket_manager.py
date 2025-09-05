@@ -6,6 +6,7 @@ from kiteconnect import KiteTicker
 import upstox_client
 from upstox_client.rest import ApiException
 import websocket
+from db import get_db_connection
 
 class WebSocketManager(threading.Thread):
     """Base class for WebSocket managers for different brokers."""
@@ -96,8 +97,6 @@ class WebSocketManager(threading.Thread):
 
     def process_tick(self, instrument_token, tick_data):
         """Shared logic to process a tick for any broker."""
-        from .db import get_db_connection
-
         # --- Broker-specific data extraction ---
         ltp = None
         best_bid = None

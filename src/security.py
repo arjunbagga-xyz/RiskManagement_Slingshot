@@ -1,6 +1,6 @@
 from cryptography.fernet import Fernet
 import logging
-from .db import get_db_connection
+from db import get_db_connection
 
 def generate_key():
     """Generates a new Fernet encryption key."""
