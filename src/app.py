@@ -8,8 +8,11 @@ import logging
 import queue
 from functools import wraps
 from db import get_db_connection, update_instrument_list, init_db
-from websocket_manager import ZerodhaWebSocketManager, UpstoxWebSocketManager
-from security import encrypt_value, decrypt_value
+from websocket_manager import ZerodhaWebSocketManager, UpstoxWebSocketManager, HyperliquidWebSocketManager
+from security import encrypt_value, decrypt_value, get_hyperliquid_wallet_address
+from hyperliquid.exchange import Exchange
+from hyperliquid.info import Info
+from hyperliquid.utils import constants
 
 app = Flask(__name__, template_folder='../templates', static_folder='../static')
 app.secret_key = os.urandom(24)
@@ -52,7 +55,8 @@ ACCESS_TOKENS = {
 }
 WEBSOCKET_MANAGERS = {
     "zerodha": None,
-    "upstox": None
+    "upstox": None,
+    "hyperliquid": None
 }
 
 # --- Utility Functions ---
@@ -294,6 +298,35 @@ def callback_upstox():
         flash(f"Error during Upstox authentication: {e}", "error")
         return redirect('/login')
 
+@app.route('/login/hyperliquid', methods=['POST'])
+def login_hyperliquid():
+    private_key = request.form.get('private_key')
+    if not private_key:
+        flash("Private key is required.", "error")
+        return redirect('/login')
+
+    wallet_address = get_hyperliquid_wallet_address(private_key)
+    if not wallet_address:
+        flash("Invalid private key.", "error")
+        return redirect('/login')
+
+    session['logged_in_broker'] = 'Hyperliquid'
+    session['wallet_address'] = wallet_address
+    session['private_key'] = encrypt_value(private_key)
+
+    if WEBSOCKET_MANAGERS['hyperliquid']:
+        WEBSOCKET_MANAGERS['hyperliquid'].stop()
+
+    WEBSOCKET_MANAGERS['hyperliquid'] = HyperliquidWebSocketManager(
+        broker='Hyperliquid',
+        access_token=None,  # Not needed for Hyperliquid
+        order_queue=order_queue
+    )
+    WEBSOCKET_MANAGERS['hyperliquid'].start()
+
+    flash(f"Successfully logged in with Hyperliquid. Wallet: {wallet_address}", "success")
+    return redirect('/')
+
 @app.route('/login')
 def login():
     return render_template('login.html')
@@ -324,6 +357,26 @@ def place_order():
                 product=request.form['product'], order_type=request.form['order_type'],
                 price=float(request.form['price']) if request.form['price'] else None
             )
+        elif broker == 'Hyperliquid':
+            from eth_account import Account
+            account = Account.from_key(decrypt_value(session['private_key']))
+            exchange = Exchange(account, constants.MAINNET_API_URL)
+            info = Info(constants.MAINNET_API_URL, skip_ws=True)
+            coin = request.form['coin']
+            is_buy = request.form['transaction_type'] == 'BUY'
+            sz = float(request.form['quantity'])
+            leverage = int(request.form['leverage'])
+            order_type = request.form['order_type']
+            limit_px = float(request.form['price']) if request.form['price'] else 0
+
+            if order_type == 'MARKET':
+                order_result = exchange.order(coin, is_buy, sz, None, {"market": {}}, leverage=leverage)
+            else:
+                order_result = exchange.order(coin, is_buy, sz, limit_px, {"limit": {"tif": "Gtc"}}, leverage=leverage)
+            if order_result["status"] == "ok":
+                order_id = order_result["response"]["data"]["statuses"][0]["resting"]["oid"]
+            else:
+                raise Exception(f"Failed to place order with Hyperliquid: {order_result['response']}")
         elif broker == 'Upstox':
             instrument = conn.execute('SELECT instrument_key FROM instruments WHERE trading_symbol = ? AND exchange = ?',
                                       (request.form['symbol'].upper(), request.form['exchange'].upper())).fetchone()
@@ -362,16 +415,28 @@ def place_order():
             if not order_id:
                 raise Exception("Failed to place order with Upstox, no order ID returned.")
 
-        instrument_key_to_store = instrument_token if broker == 'Upstox' else conn.execute('SELECT instrument_key FROM instruments WHERE trading_symbol = ? AND exchange = ? AND broker = ?', (request.form['symbol'].upper(), request.form['exchange'].upper(), broker)).fetchone()['instrument_key']
+        if broker == 'Hyperliquid':
+            price = float(request.form['price'] or 0)
+            stoploss_percent = float(request.form['stoploss'])
+            initial_stoploss_price = price * (1 - stoploss_percent / 100) if request.form['transaction_type'] == 'BUY' else price * (1 + stoploss_percent / 100)
+            conn.execute(
+                'INSERT INTO orders (order_id, symbol, quantity, price, initial_stoploss, current_stoploss_price, status, broker, transaction_type, exchange, product, instrument_key, leverage) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                (order_id, request.form['coin'], float(request.form['quantity']), price, stoploss_percent, initial_stoploss_price, 'OPEN', broker, request.form['transaction_type'], 'HYPERLIQUID', 'PERPETUAL', request.form['coin'], int(request.form['leverage']))
+            )
+            ws_manager = WEBSOCKET_MANAGERS.get(broker.lower())
+            if ws_manager:
+                ws_manager.subscribe([request.form['coin']])
+            return redirect('/')
+        else:
+            instrument_key_to_store = instrument_token if broker == 'Upstox' else conn.execute('SELECT instrument_key FROM instruments WHERE trading_symbol = ? AND exchange = ? AND broker = ?', (request.form['symbol'].upper(), request.form['exchange'].upper(), broker)).fetchone()['instrument_key']
+            price = float(request.form['price'] or 0)
+            stoploss_percent = float(request.form['stoploss'])
+            initial_stoploss_price = price * (1 - stoploss_percent / 100) if price > 0 else 0
 
-        price = float(request.form['price'] or 0)
-        stoploss_percent = float(request.form['stoploss'])
-        initial_stoploss_price = price * (1 - stoploss_percent / 100) if price > 0 else 0
-
-        conn.execute(
-            'INSERT INTO orders (order_id, symbol, quantity, price, initial_stoploss, current_stoploss_price, status, broker, transaction_type, exchange, product, instrument_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            (order_id, request.form['symbol'], int(request.form['quantity']), price, stoploss_percent, initial_stoploss_price, 'OPEN', broker, request.form['transaction_type'], request.form['exchange'], request.form['product'], instrument_key_to_store)
-        )
+            conn.execute(
+                'INSERT INTO orders (order_id, symbol, quantity, price, initial_stoploss, current_stoploss_price, status, broker, transaction_type, exchange, product, instrument_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                (order_id, request.form['symbol'], int(request.form['quantity']), price, stoploss_percent, initial_stoploss_price, 'OPEN', broker, request.form['transaction_type'], request.form['exchange'], request.form['product'], instrument_key_to_store)
+            )
         conn.commit()
 
         # Subscribe to the instrument's ticks

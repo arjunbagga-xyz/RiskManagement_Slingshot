@@ -1,6 +1,16 @@
 from cryptography.fernet import Fernet
 import logging
 from db import get_db_connection
+from eth_account import Account
+
+def get_hyperliquid_wallet_address(private_key: str) -> str:
+    """Derives the wallet address from a private key."""
+    try:
+        account = Account.from_key(private_key)
+        return account.address
+    except Exception as e:
+        logging.error(f"Error deriving wallet address: {e}")
+        return ""
 
 def generate_key():
     """Generates a new Fernet encryption key."""

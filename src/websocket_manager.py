@@ -7,6 +7,8 @@ import upstox_client
 from upstox_client.rest import ApiException
 import websocket
 from db import get_db_connection
+from hyperliquid.info import Info
+from hyperliquid.utils import constants
 
 class WebSocketManager(threading.Thread):
     """Base class for WebSocket managers for different brokers."""
@@ -119,6 +121,10 @@ class WebSocketManager(threading.Thread):
             else:
                 # Fallback to just ltpc if that's all we get
                 ltp = tick_data.get('ltpc', {}).get('ltp')
+        elif self.broker == 'Hyperliquid':
+            if 'levels' in tick_data and tick_data['levels'] and tick_data['levels'][0]:
+                ltp = float(tick_data['levels'][0][0]['px'])
+                best_bid = ltp
 
         if not instrument_token or ltp is None:
             return
@@ -139,7 +145,8 @@ class WebSocketManager(threading.Thread):
             current_stoploss_price = float(order['current_stoploss_price'])
 
             # --- Stop-Loss Trigger Logic (using LTP) ---
-            if ltp <= current_stoploss_price:
+            if (order['transaction_type'] == 'BUY' and ltp <= current_stoploss_price) or \
+               (order['transaction_type'] == 'SELL' and ltp >= current_stoploss_price and current_stoploss_price > 0):
                 logging.info(f"--- STOP-LOSS TRIGGERED for order {order['order_id']} at price {ltp} (SL: {current_stoploss_price}) ---")
                 exit_transaction_type = 'SELL' if order['transaction_type'] == 'BUY' else 'BUY'
                 order_details = {
@@ -169,16 +176,26 @@ class WebSocketManager(threading.Thread):
                     # For SELL orders (short-selling), one might use the best ask price.
                     # This is not implemented as the UI doesn't explicitly support shorting.
 
-                new_stoploss_price = price_for_trailing * (1 - stoploss_percent / 100)
-                if new_stoploss_price > current_stoploss_price:
-                    profit = ((ltp - initial_price) / initial_price) * 100 if initial_price > 0 else 0
-                    conn.execute(
-                        'UPDATE orders SET current_stoploss_price = ?, potential_profit = ? WHERE id = ?',
-                        (new_stoploss_price, profit, order['id'])
-                    )
-                    conn.commit()
-                    logging.info(f"Trailing stop-loss for {order['symbol']} updated to {new_stoploss_price:.2f} (using price: {price_for_trailing}, product: {product_type})")
-
+                if order['transaction_type'] == 'BUY':
+                    new_stoploss_price = price_for_trailing * (1 - stoploss_percent / 100)
+                    if new_stoploss_price > current_stoploss_price:
+                        profit = ((ltp - initial_price) / initial_price) * 100 if initial_price > 0 else 0
+                        conn.execute(
+                            'UPDATE orders SET current_stoploss_price = ?, potential_profit = ? WHERE id = ?',
+                            (new_stoploss_price, profit, order['id'])
+                        )
+                        conn.commit()
+                        logging.info(f"Trailing stop-loss for {order['symbol']} updated to {new_stoploss_price:.2f} (using price: {price_for_trailing}, product: {product_type})")
+                else: # SELL order
+                    new_stoploss_price = price_for_trailing * (1 + stoploss_percent / 100)
+                    if new_stoploss_price < current_stoploss_price or current_stoploss_price == 0:
+                        profit = ((initial_price - ltp) / initial_price) * 100 if initial_price > 0 else 0
+                        conn.execute(
+                            'UPDATE orders SET current_stoploss_price = ?, potential_profit = ? WHERE id = ?',
+                            (new_stoploss_price, profit, order['id'])
+                        )
+                        conn.commit()
+                        logging.info(f"Trailing stop-loss for {order['symbol']} updated to {new_stoploss_price:.2f} (using price: {price_for_trailing}, product: {product_type})")
         except Exception as e:
             logging.error(f"Error processing tick for order {order['order_id']}: {e}")
         finally:
@@ -268,3 +285,43 @@ class UpstoxWebSocketManager(WebSocketManager):
         self.running = False
         if self.ws:
             self.ws.disconnect()
+
+class HyperliquidWebSocketManager(WebSocketManager):
+    def connect(self):
+        logging.info("Connecting to Hyperliquid WebSocket...")
+        self.info = Info(constants.MAINNET_API_URL, skip_ws=True)
+        self.ws = websocket.WebSocketApp(
+            constants.MAINNET_API_URL,
+            on_message=self.on_message,
+            on_error=self.on_error,
+            on_close=self.on_close,
+        )
+        self.ws.on_open = self.on_open
+        self.ws.run_forever()
+
+    def on_open(self, ws):
+        logging.info("Hyperliquid WebSocket connected.")
+        self._resubscribe()
+
+    def on_message(self, ws, message):
+        data = json.loads(message)
+        if "channel" in data and data["channel"] == "l2Book":
+            coin = data["data"]["coin"]
+            if coin in self.subscribed_instruments:
+                self.process_tick(coin, data["data"])
+
+    def on_error(self, ws, error):
+        logging.error(f"Hyperliquid WebSocket error: {error}")
+
+    def on_close(self, ws, close_status_code, close_msg):
+        logging.info("Hyperliquid WebSocket closed.")
+
+    def _resubscribe(self):
+        if self.subscribed_instruments:
+            for coin in self.subscribed_instruments:
+                subscription_message = {
+                    "method": "subscribe",
+                    "subscription": {"type": "l2Book", "coin": coin},
+                }
+                self.ws.send(json.dumps(subscription_message))
+                logging.info(f"Subscribed to {coin} on Hyperliquid.")

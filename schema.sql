@@ -3,7 +3,7 @@ CREATE TABLE orders (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     order_id TEXT NOT NULL,
     symbol TEXT NOT NULL,
-    quantity INTEGER NOT NULL,
+    quantity REAL NOT NULL,
     price REAL NOT NULL,
     initial_stoploss REAL NOT NULL,
     current_stoploss_price REAL NOT NULL,
@@ -13,7 +13,8 @@ CREATE TABLE orders (
     exchange TEXT,
     product TEXT,
     broker TEXT NOT NULL,
-    instrument_key TEXT
+    instrument_key TEXT,
+    leverage INTEGER
 );
 
 DROP TABLE IF EXISTS instruments;

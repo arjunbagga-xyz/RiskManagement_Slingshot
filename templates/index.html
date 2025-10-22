@@ -5,6 +5,44 @@
 {% block content %}
 <div class="glass-panel">
     <h1>Place an Order</h1>
+    {% if session.logged_in_broker == 'Hyperliquid' %}
+    <form action="/place_order" method="post" id="order-form-hyperliquid">
+        <div class="form-grid">
+            <div class="form-column">
+                <label for="coin">Coin:</label><br>
+                <input type="text" id="coin" name="coin" autocomplete="off"><br>
+
+                <label for="quantity">Quantity:</label><br>
+                <input type="number" step="any" id="quantity" name="quantity" value="1"><br>
+
+                <label for="transaction_type">Transaction Type:</label><br>
+                <select id="transaction_type" name="transaction_type">
+                    <option value="BUY">BUY</option>
+                    <option value="SELL">SELL</option>
+                </select><br>
+
+                <label for="leverage">Leverage:</label><br>
+                <input type="number" id="leverage" name="leverage" value="1"><br>
+            </div>
+            <div class="form-column">
+                <label for="order_type">Order Type:</label><br>
+                <select id="order_type" name="order_type">
+                    <option value="MARKET">Market</option>
+                    <option value="LIMIT">Limit</option>
+                </select><br>
+
+                <label for="price">Price (for LIMIT orders):</label><br>
+                <input type="number" step="any" id="price" name="price"><br>
+
+                <label for="stoploss">Trailing Stoploss (%):</label><br>
+                <input type="number" step="any" id="stoploss" name="stoploss"><br>
+            </div>
+        </div>
+        <div class="submit-container">
+            <input type="submit" value="Place Order">
+        </div>
+    </form>
+    {% else %}
     <form action="/place_order" method="post" id="order-form">
         <div class="form-grid">
             <div class="form-column">
@@ -53,6 +91,7 @@
             <input type="submit" value="Place Order">
         </div>
     </form>
+    {% endif %}
 </div>
 
 <div class="glass-panel">
@@ -69,6 +108,9 @@
                 <th>Initial Stoploss</th>
                 <th>Current Stop-Loss Price</th>
                 <th>Potential Profit Locked In (%)</th>
+{% if session.logged_in_broker == 'Hyperliquid' %}
+<th>Leverage</th>
+{% endif %}
             </tr>
         </thead>
         <tbody>
@@ -82,6 +124,9 @@
                 <td>{{ order.initial_stoploss }}%</td>
                 <td>{{ "%.2f"|format(order.current_stoploss_price) }}</td>
                 <td>{{ "%.2f"|format(order.potential_profit) }}%</td>
+{% if session.logged_in_broker == 'Hyperliquid' %}
+<td>{{ order.leverage }}x</td>
+{% endif %}
             </tr>
             {% endfor %}
         </tbody>

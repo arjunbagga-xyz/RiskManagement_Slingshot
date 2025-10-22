@@ -5,3 +5,4 @@ requests
 websocket-client
 protobuf
 grpcio-tools
+hyperliquid-python-sdk
